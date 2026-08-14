@@ -4,72 +4,116 @@ namespace Sd1\QueryViewer\Services;
 
 use Sd1\QueryViewer\Exceptions\QueryDebugException;
 use Sd1\QueryViewer\Support\Context;
-use Sd1\QueryViewer\Support\QueryDebugStore;
 use Sd1\QueryViewer\Support\TraceStore;
 
 /**
- * Mengubah isi ring buffer (sementara, per-user) jadi trace permanen berkode.
+ * Menyimpan trace dari data ter-kurasi yang dikirim panel.
  *
- * Pola yang dipakai adalah "flight recorder", bukan tombol Rekam:
- * perekaman sudah jalan terus di latar sejak sesi di-unlock, dan support baru
- * menekan tombol SETELAH menemukan kejanggalan. Alasannya sederhana — support
- * tidak pernah tahu bug akan muncul sebelum bug itu muncul, jadi tombol
- * "mulai rekam" pasti kelewat dipencet.
+ * Beda penting dari versi awal: langkah TIDAK lagi dibaca ulang dari ring
+ * buffer saat capture. Panel mengirim snapshot yang dibekukan tepat saat
+ * support menekan Ambil Kasus — lengkap dengan pengelompokan, langkah mana
+ * yang disertakan, dan titik gagal. Alasannya: buffer terus merekam di latar
+ * (flight recorder), jadi membaca ulang saat submit berisiko mengambil kondisi
+ * yang sudah bergeser beberapa detik dari yang dilihat support.
+ *
+ * Data dari panel memang berasal dari server sendiri (sudah ter-redact saat
+ * di-push ke buffer), tapi tetap dinormalisasi di sini supaya bentuk file
+ * trace stabil dan tidak bergantung struktur internal panel.
  */
 class TraceService
 {
     /**
-     * @param  int    $limit    berapa step terakhir yang diambil
-     * @param  int    $suspect  indeks step yang ditandai support sebagai biang masalah (-1 = tidak ada)
+     * @param string $code  kode yang sudah dibuat controller (agar folder
+     *                       lampiran bisa disiapkan sebelum JSON ditulis)
+     * @param array $data  ['description','category','prpk','curated'=>['groups','steps']]
+     * @param array $attachments  hasil normalisasi controller: [['type','kind','src','name','idx'], ...]
      */
-    public function capture(string $identity, string $note, int $limit, int $suspect): array
+    public function captureWithCode(string $code, string $identity, array $data, array $attachments): array
     {
-        // recentFor() mengembalikan TERBARU DULU. Untuk trace kita balik lagi
-        // jadi kronologis, karena dev membacanya sebagai alur waktu.
-        $batches = array_reverse(QueryDebugStore::recentFor($identity));
+        $curated = isset($data['curated']) && is_array($data['curated']) ? $data['curated'] : [];
+        $rawSteps  = isset($curated['steps'])  && is_array($curated['steps'])  ? $curated['steps']  : [];
+        $rawGroups = isset($curated['groups']) && is_array($curated['groups']) ? $curated['groups'] : [];
 
-        if (empty($batches)) {
-            throw new QueryDebugException(
-                'Belum ada langkah yang terekam. Lakukan dulu langkah yang bermasalah, baru tekan Ambil Kasus.',
-                422
-            );
+        $description = trim((string) (isset($data['description']) ? $data['description'] : ''));
+        if ($description === '') {
+            throw new QueryDebugException('Deskripsi masalah wajib diisi.', 422);
+        }
+
+        $includedCount = 0;
+        foreach ($rawSteps as $s) {
+            if (! empty($s['included'])) {
+                $includedCount++;
+            }
+        }
+        if ($includedCount === 0) {
+            throw new QueryDebugException('Pilih minimal satu langkah untuk disertakan.', 422);
         }
 
         $max = (int) config('querydebug.trace.max_steps', 40);
-        if ($limit > 0 && $limit < count($batches)) {
-            $batches = array_slice($batches, -$limit);
-        }
-        if (count($batches) > $max) {
-            $batches = array_slice($batches, -$max);
-        }
 
+        // Nomor langkah hanya diberikan ke langkah yang DISERTAKAN, mengikuti
+        // urutan kronologis. Langkah yang dikecualikan tetap disimpan (included
+        // = false) supaya dev bisa membukanya kalau ternyata itu yang penting,
+        // tapi tidak ikut menomori narasi utama.
         $steps = [];
-        foreach (array_values($batches) as $i => $batch) {
-            $steps[] = $this->toStep($i + 1, $batch);
+        $no = 0;
+        foreach ($rawSteps as $s) {
+            $included = ! empty($s['included']);
+            if ($included) {
+                if ($no >= $max) {
+                    continue; // batasi hanya langkah yang disertakan
+                }
+                $no++;
+            }
+            $steps[] = $this->normalizeStep($s, $included ? $no : null);
         }
 
-        $first = reset($batches);
+        $groups = [];
+        foreach ($rawGroups as $g) {
+            $label = trim((string) (isset($g['label']) ? $g['label'] : ''));
+            $groups[] = [
+                'label'  => $label !== '' ? $label : '(tanpa nama)',
+                'failed' => ! empty($g['failed']),
+                'origin' => isset($g['origin']) ? (string) $g['origin'] : null,
+            ];
+        }
+
+        $first = null;
+        foreach ($steps as $st) {
+            if ($st['no'] !== null) {
+                $first = $st;
+                break;
+            }
+        }
+
+        $categories = (array) config('querydebug.trace.categories', []);
+        $category   = (string) (isset($data['category']) ? $data['category'] : '');
+        if (! isset($categories[$category])) {
+            $category = 'lainnya';
+        }
 
         $trace = [
-            'code'        => TraceStore::newCode(),
-            'captured_at' => date('Y-m-d H:i:s'),
-            'note'        => $note,
-            'suspect'     => ($suspect >= 1 && $suspect <= count($steps)) ? $suspect : count($steps),
-            'user'        => $identity,
+            'code'         => $code,
+            'captured_at'  => date('Y-m-d H:i:s'),
+            'user'         => $identity,
 
-            // Metadata yang sudah dipakai fitur export tiket dipakai ulang di
-            // sini — untuk IAS-PHP isinya cabang/IGR, dan justru inilah yang
-            // paling sering bikin dev gagal reproduce kalau tidak tercatat.
-            'context'     => Context::ticketMeta(),
-            'conn'        => isset($first['conn']) ? $first['conn'] : null,
+            'description'  => $description,
+            'category'     => $category,
+            'category_label' => isset($categories[$category]) ? $categories[$category] : $category,
+            'prpk'         => $this->cleanPrpk(isset($data['prpk']) ? $data['prpk'] : ''),
 
-            'app'         => [
-                'url'      => config('app.url'),
-                'host'     => request()->getHost(),
-                'php'      => PHP_VERSION,
+            'context'      => Context::ticketMeta(),
+            'conn'         => $first ? $first['conn'] : null,
+            'app'          => [
+                'url'  => config('app.url'),
+                'host' => request()->getHost(),
+                'php'  => PHP_VERSION,
             ],
 
-            'steps'       => $steps,
+            'excluded_count' => count($steps) - $includedCount,
+            'attachments'  => array_values($attachments),
+            'groups'       => $groups,
+            'steps'        => $steps,
         ];
 
         TraceStore::put($trace);
@@ -80,7 +124,6 @@ class TraceService
     public function show(string $code): array
     {
         $trace = TraceStore::find($code);
-
         if ($trace === null) {
             throw new QueryDebugException('Trace ' . $code . ' tidak ditemukan.', 404);
         }
@@ -93,36 +136,44 @@ class TraceService
         return TraceStore::recent($limit);
     }
 
-    /**
-     * Normalisasi satu batch jadi bentuk step yang stabil untuk viewer & JSON
-     * export. Sengaja tidak menyimpan seluruh isi batch mentah supaya format
-     * trace tidak ikut berubah tiap kali struktur internal store berubah.
-     */
-    private function toStep(int $no, array $batch): array
+    private function cleanPrpk($value): string
+    {
+        $value = trim((string) $value);
+        // Hanya karakter yang wajar untuk id PRPK/memo — cegah value liar
+        // ikut tersimpan/terpampang.
+        $value = preg_replace('/[^A-Za-z0-9\/\-_.]/', '', $value);
+
+        return substr((string) $value, 0, 60);
+    }
+
+    private function normalizeStep(array $s, $no): array
     {
         $queries = [];
-        foreach ((isset($batch['queries']) ? $batch['queries'] : []) as $q) {
+        foreach ((isset($s['queries']) && is_array($s['queries']) ? $s['queries'] : []) as $q) {
             $queries[] = [
-                'raw'    => isset($q['raw']) ? $q['raw'] : '',
-                'ms'     => isset($q['time_ms']) ? $q['time_ms'] : null,
+                'raw'    => isset($q['raw']) ? (string) $q['raw'] : '',
+                'ms'     => isset($q['ms']) ? $q['ms'] : null,
                 'failed' => ! empty($q['failed']),
                 'error'  => isset($q['error']) ? $q['error'] : null,
             ];
         }
 
         return [
-            'no'      => $no,
-            'at'      => isset($batch['at']) ? $batch['at'] : null,
-            'method'  => isset($batch['method']) ? $batch['method'] : null,
-            'path'    => isset($batch['path']) ? $batch['path'] : null,
-            'route'   => isset($batch['route']) ? $batch['route'] : null,
-            'is_ajax' => ! empty($batch['is_ajax']),
-            'status'  => isset($batch['status']) ? $batch['status'] : null,
-            'dur_ms'  => isset($batch['dur_ms']) ? $batch['dur_ms'] : null,
-            'conn'    => isset($batch['conn']) ? $batch['conn'] : null,
-            'input'   => isset($batch['input']) ? $batch['input'] : [],
-            'error'   => isset($batch['error']) ? $batch['error'] : null,
-            'queries' => $queries,
+            'no'         => $no,               // null = dikecualikan support
+            'included'   => $no !== null,
+            'fail_point' => ! empty($s['fail_point']),
+            'group'      => isset($s['group']) ? (int) $s['group'] : 0,
+            'at'         => isset($s['at']) ? $s['at'] : null,
+            'method'     => isset($s['method']) ? $s['method'] : null,
+            'path'       => isset($s['path']) ? $s['path'] : null,
+            'route'      => isset($s['route']) ? $s['route'] : null,
+            'is_ajax'    => ! empty($s['is_ajax']),
+            'status'     => isset($s['status']) ? $s['status'] : null,
+            'dur_ms'     => isset($s['dur_ms']) ? $s['dur_ms'] : null,
+            'conn'       => isset($s['conn']) ? $s['conn'] : null,
+            'input'      => isset($s['input']) && is_array($s['input']) ? $s['input'] : [],
+            'error'      => isset($s['error']) ? $s['error'] : null,
+            'queries'    => $queries,
         ];
     }
 }

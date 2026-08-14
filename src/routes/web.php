@@ -45,4 +45,5 @@ Route::group([
     Route::get('/', [TraceController::class, 'index']);
     Route::get('/{code}', [TraceController::class, 'show']);
     Route::get('/{code}/json', [TraceController::class, 'json']);
+    Route::get('/{code}/file/{idx}', [TraceController::class, 'attachment']);
 });

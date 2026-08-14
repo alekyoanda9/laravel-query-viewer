@@ -669,70 +669,273 @@
      * support menekan tombol ini tepat setelah melihat hasil yang salah,
      * jadi langkah terakhir hampir selalu yang bermasalah.
      */
+    // capState = snapshot yang DIBEKUKAN saat support membuka layar Ambil Kasus.
+    // Sengaja pakai snapshot, bukan baca ulang buffer saat submit: buffer terus
+    // merekam di latar (flight recorder), jadi yang harus tersimpan adalah
+    // kondisi tepat saat support memutuskan mengambil kasus — bukan beberapa
+    // detik kemudian setelah ada request lain menggeser isinya.
+    var capState = null;
+
+    function buildCapState() {
+        // lastBatches = TERBARU DULU; dibalik jadi kronologis supaya nomor
+        // langkah naik sesuai urutan support mengerjakannya.
+        var chron = lastBatches.slice().reverse();
+        var groups = [];
+        var originToGroup = {};
+        var steps = [];
+
+        chron.forEach(function (b, i) {
+            var origin = originOf(b);
+            if (!(origin in originToGroup)) {
+                originToGroup[origin] = groups.length;
+                groups.push({ id: 'g' + groups.length, label: '/' + origin, origin: origin });
+            }
+            steps.push({
+                idx: i,
+                batch: b,
+                group: groups[originToGroup[origin]].id,
+                included: true,
+                failPoint: false
+            });
+        });
+
+        capState = { steps: steps, groups: groups, failedGroup: null };
+    }
+
     function openCapture() {
         if (!capModal) return;
-        var sel = capModal.querySelector('[data-qd="cap-suspect"]');
+        if (!lastBatches.length) {
+            capModal.removeAttribute('hidden');
+            capModal.querySelector('[data-qd="cap-steps"]').innerHTML =
+                '<div class="qd-empty">Belum ada langkah terekam. Lakukan dulu langkahnya, baru Ambil Kasus.</div>';
+            return;
+        }
+
+        buildCapState();
+
+        // kategori
+        var catSel = capModal.querySelector('[data-qd="cap-category"]');
+        if (catSel && !catSel.dataset.filled) {
+            var cats = CFG.traceCategories || {};
+            var opts = '';
+            Object.keys(cats).forEach(function (k) {
+                opts += '<option value="' + esc(k) + '">' + esc(cats[k]) + '</option>';
+            });
+            catSel.innerHTML = opts || '<option value="lainnya">Lainnya</option>';
+            catSel.dataset.filled = '1';
+        }
+
         var res = capModal.querySelector('[data-qd="cap-result"]');
         if (res) res.innerHTML = '';
 
-        // lastBatches = TERBARU DULU; trace disimpan kronologis, jadi nomor
-        // langkah dibalik supaya cocok dengan yang nanti dilihat dev.
-        var total = lastBatches.length;
-        if (sel) {
-            var html = '';
-            lastBatches.forEach(function (b, i) {
-                var no = total - i;
-                html += '<option value="' + no + '"' + (i === 0 ? ' selected' : '') + '>'
-                     + no + '. ' + esc((b.method || '') + ' /' + (b.path || '')) + '</option>';
-            });
-            sel.innerHTML = html || '<option value="-1">(belum ada langkah)</option>';
-        }
+        renderCapSteps();
         capModal.removeAttribute('hidden');
     }
 
     function closeCapture() { if (capModal) capModal.setAttribute('hidden', ''); }
 
-    function submitCapture() {
-        var noteEl = capModal.querySelector('[data-qd="cap-note"]');
-        var selEl = capModal.querySelector('[data-qd="cap-suspect"]');
-        var res = capModal.querySelector('[data-qd="cap-result"]');
-        var note = noteEl ? noteEl.value.trim() : '';
+    // Susun ulang langkah menjadi urutan grup (grup mengikuti urutan
+    // kemunculan langkah pertamanya), supaya "pisah grup" langsung terlihat.
+    function orderedGroups() {
+        var seen = {}; var order = [];
+        capState.steps.forEach(function (st) {
+            if (!(st.group in seen)) { seen[st.group] = true; order.push(st.group); }
+        });
+        return order.map(function (gid) {
+            return capState.groups.filter(function (g) { return g.id === gid; })[0];
+        }).filter(Boolean);
+    }
 
-        if (!note) {
-            if (res) res.innerHTML = '<div class="qd-err">Isi dulu catatan singkatnya — ini yang dibaca developer duluan.</div>';
-            if (noteEl) noteEl.focus();
+    function renderCapSteps() {
+        var wrap = capModal.querySelector('[data-qd="cap-steps"]');
+        var countEl = capModal.querySelector('[data-qd="cap-count"]');
+        if (!wrap) return;
+
+        var incl = capState.steps.filter(function (s) { return s.included; }).length;
+        if (countEl) countEl.textContent = '(' + incl + ' dari ' + capState.steps.length + ' dipakai)';
+
+        var html = '';
+        orderedGroups().forEach(function (g) {
+            var groupSteps = capState.steps.filter(function (s) { return s.group === g.id; });
+            var isFailed = capState.failedGroup === g.id;
+
+            html += '<div class="qd-cap-group' + (isFailed ? ' failed' : '') + '">';
+            html += '<div class="qd-cap-ghead">' +
+                '<input type="text" class="qd-cap-glabel" data-qd="cap-glabel" data-gid="' + esc(g.id) + '" value="' + esc(g.label) + '">' +
+                '<label class="qd-cap-fail"><input type="checkbox" data-qd="cap-gfail" data-gid="' + esc(g.id) + '"' + (isFailed ? ' checked' : '') + '> gagal di bagian ini</label>' +
+                '</div>';
+
+            groupSteps.forEach(function (st, k) {
+                var b = st.batch;
+                var isFirstInGroup = (k === 0);
+                // tombol "pisah di sini" muncul mulai langkah ke-2 dalam grup
+                if (!isFirstInGroup) {
+                    html += '<div class="qd-cap-split" data-qd="cap-split" data-idx="' + st.idx + '">— pisah grup di sini —</div>';
+                }
+                var badge = b.error ? '<span class="qd-cap-b bad">ERR</span>'
+                    : (b.status && b.status >= 400 ? '<span class="qd-cap-b bad">' + b.status + '</span>' : '');
+                html += '<div class="qd-cap-step' + (st.included ? '' : ' off') + (st.failPoint ? ' fp' : '') + '">' +
+                    '<label class="qd-cap-inc"><input type="checkbox" data-qd="cap-inc" data-idx="' + st.idx + '"' + (st.included ? ' checked' : '') + '></label>' +
+                    '<span class="qd-cap-m ' + esc(b.method || '') + '">' + esc(b.method || '') + '</span>' +
+                    '<span class="qd-cap-p">/' + esc(b.path || '') + '</span>' +
+                    badge +
+                    '<button class="qd-cap-fp" data-qd="cap-fp" data-idx="' + st.idx + '" title="Tandai titik yang gagal">' + (st.failPoint ? '● titik gagal' : '○') + '</button>' +
+                    '</div>';
+            });
+
+            html += '</div>';
+        });
+
+        wrap.innerHTML = html;
+    }
+
+    function capStepByIdx(idx) {
+        return capState.steps.filter(function (s) { return s.idx === idx; })[0];
+    }
+
+    // "pisah grup di sini": langkah ini + semua langkah SESUDAHNYA yang masih
+    // satu grup dipindah ke grup baru. Tidak menyentuh langkah di grup lain.
+    function splitAt(idx) {
+        var pivot = capStepByIdx(idx);
+        if (!pivot) return;
+        var oldGid = pivot.group;
+        var newGid = 'g' + (capState.groups.length) + '_' + Date.now();
+        var base = capState.groups.filter(function (g) { return g.id === oldGid; })[0];
+        capState.groups.push({ id: newGid, label: (base ? base.label : '') + ' (lanjutan)', origin: base ? base.origin : '' });
+        var moving = false;
+        capState.steps.forEach(function (s) {
+            if (s.idx === idx) moving = true;
+            if (moving && s.group === oldGid) s.group = newGid;
+        });
+        if (capState.failedGroup === oldGid) capState.failedGroup = null;
+        renderCapSteps();
+    }
+
+    function collectPayload() {
+        var groupsOut = orderedGroups().map(function (g) {
+            return { label: g.label, failed: capState.failedGroup === g.id, origin: g.origin };
+        });
+        var groupIndex = {};
+        orderedGroups().forEach(function (g, i) { groupIndex[g.id] = i; });
+
+        var stepsOut = capState.steps.map(function (st) {
+            var b = st.batch;
+            return {
+                included: st.included,
+                fail_point: st.failPoint,
+                group: groupIndex[st.group],
+                method: b.method, path: b.path, route: b.route,
+                origin: originOf(b),
+                is_ajax: b.is_ajax, at: b.at, status: b.status, dur_ms: b.dur_ms,
+                conn: b.conn || b.connection || null,
+                input: b.input || {},
+                error: b.error || null,
+                queries: (b.queries || []).map(function (q) {
+                    return { raw: q.raw, ms: q.time_ms, failed: !!q.failed, error: q.error || null };
+                })
+            };
+        });
+
+        return { groups: groupsOut, steps: stepsOut };
+    }
+
+    function submitCapture() {
+        var descEl = capModal.querySelector('[data-qd="cap-desc"]');
+        var catEl = capModal.querySelector('[data-qd="cap-category"]');
+        var prpkEl = capModal.querySelector('[data-qd="cap-prpk"]');
+        var filesEl = capModal.querySelector('[data-qd="cap-files"]');
+        var res = capModal.querySelector('[data-qd="cap-result"]');
+        var desc = descEl ? descEl.value.trim() : '';
+
+        if (!desc) {
+            if (res) res.innerHTML = '<div class="qd-err">Isi deskripsinya dulu — ini yang dibaca developer duluan.</div>';
+            if (descEl) descEl.focus();
             return;
         }
+        if (!capState || !capState.steps.some(function (s) { return s.included; })) {
+            if (res) res.innerHTML = '<div class="qd-err">Pilih minimal satu langkah untuk disertakan.</div>';
+            return;
+        }
+
+        // Validasi lampiran di klien dulu (ukuran/jumlah) supaya support dapat
+        // pesan cepat tanpa menunggu upload gagal di server.
+        var files = filesEl ? filesEl.files : [];
+        if (files.length > (CFG.maxAttachments || 6)) {
+            if (res) res.innerHTML = '<div class="qd-err">Maksimal ' + (CFG.maxAttachments || 6) + ' lampiran.</div>';
+            return;
+        }
+        for (var i = 0; i < files.length; i++) {
+            if (files[i].size > (CFG.maxUploadKb || 5120) * 1024) {
+                if (res) res.innerHTML = '<div class="qd-err">"' + esc(files[i].name) + '" melebihi ' + Math.round((CFG.maxUploadKb || 5120) / 1024) + ' MB. Untuk video besar, tempel link-nya di deskripsi.</div>';
+                return;
+            }
+        }
+
+        var fd = new FormData();
+        fd.append('payload', JSON.stringify({
+            description: desc,
+            category: catEl ? catEl.value : 'lainnya',
+            prpk: prpkEl ? prpkEl.value.trim() : '',
+            curated: collectPayload()
+        }));
+        for (var j = 0; j < files.length; j++) fd.append('files[]', files[j]);
+
         if (res) res.innerHTML = '<div class="qd-empty">Menyimpan...</div>';
 
         fetch(CFG.captureUrl, {
             method: 'POST',
-            headers: authHeaders({ 'X-CSRF-TOKEN': getCsrf(), 'Content-Type': 'application/json' }),
+            headers: authHeaders({ 'X-CSRF-TOKEN': getCsrf() }), // JANGAN set Content-Type: biar browser isi boundary multipart
             credentials: 'same-origin',
-            body: JSON.stringify({
-                note: note,
-                suspect: selEl ? parseInt(selEl.value, 10) : -1
-            })
+            body: fd
         }).then(function (r) {
             return r.json().then(function (j) { return { ok: r.ok, json: j }; });
         }).then(function (out) {
             if (!out.ok) {
-                res.innerHTML = '<div class="qd-err">' + esc(out.json.message || 'Gagal menyimpan trace.') + '</div>';
+                res.innerHTML = '<div class="qd-err">' + esc((out.json && out.json.message) || 'Gagal menyimpan trace.') + '</div>';
                 return;
             }
             var d = out.json.data || {};
             res.innerHTML =
-                '<div style="background:#243024;border-radius:4px;padding:8px 10px">'
-                + '<div style="color:#9b9b93;margin-bottom:4px">Kirim kode ini ke developer:</div>'
-                + '<div style="font-size:15px;font-weight:600;letter-spacing:.02em">' + esc(d.code || '') + '</div>'
-                + '<button data-qd="cap-copy" data-code="' + esc(d.code || '') + '" style="margin-top:6px">Copy kode</button>'
-                + '</div>';
+                '<div class="qd-cap-ok">' +
+                '<div class="qd-cap-oklbl">Kirim link ini ke developer:</div>' +
+                '<div class="qd-cap-code">' + esc(d.code || '') + '</div>' +
+                '<div class="qd-cap-url">' + esc(d.url || '') + '</div>' +
+                '<div class="qd-cap-okbtns">' +
+                '<button data-qd="cap-copy-url" data-url="' + esc(d.url || '') + '">Copy link</button>' +
+                '<button data-qd="cap-copy" data-code="' + esc(d.code || '') + '">Copy kode</button>' +
+                '</div></div>';
         }).catch(function () {
             res.innerHTML = '<div class="qd-err">Gagal menghubungi server.</div>';
         });
     }
 
     // ---- events ------------------------------------------------------------
+
+    // Kontrol di layar review capture yang butuh event change/input (checkbox
+    // & text), bukan click — didelegasikan di panel supaya tetap jalan walau
+    // isinya di-render ulang.
+    panel.addEventListener('change', function (e) {
+        var t = e.target, action = t.getAttribute('data-qd');
+        if (!capState) return;
+        if (action === 'cap-inc') {
+            var st = capStepByIdx(parseInt(t.getAttribute('data-idx'), 10));
+            if (st) st.included = t.checked;
+            renderCapSteps();
+        } else if (action === 'cap-gfail') {
+            var gid = t.getAttribute('data-gid');
+            capState.failedGroup = t.checked ? gid : (capState.failedGroup === gid ? null : capState.failedGroup);
+            renderCapSteps();
+        }
+    });
+
+    panel.addEventListener('input', function (e) {
+        var t = e.target;
+        if (t.getAttribute('data-qd') === 'cap-glabel' && capState) {
+            var gid = t.getAttribute('data-gid');
+            var g = capState.groups.filter(function (x) { return x.id === gid; })[0];
+            if (g) g.label = t.value; // tidak re-render: biar fokus input tidak lompat saat mengetik
+        }
+    });
 
     fab.addEventListener('click', function () { isOpen() ? close() : open(); });
 
@@ -748,6 +951,14 @@
         if (action === 'cap-close') return closeCapture();
         if (action === 'cap-submit') return submitCapture();
         if (action === 'cap-copy') { copyText(t.getAttribute('data-code') || '', t); return; }
+        if (action === 'cap-copy-url') { copyText(t.getAttribute('data-url') || '', t); return; }
+        if (action === 'cap-split') { splitAt(parseInt(t.getAttribute('data-idx'), 10)); return; }
+        if (action === 'cap-fp') {
+            var fpi = parseInt(t.getAttribute('data-idx'), 10);
+            capState.steps.forEach(function (s) { s.failPoint = (s.idx === fpi) ? !s.failPoint : false; });
+            renderCapSteps();
+            return;
+        }
 
         // ---- modal export ----
         if (action === 'md-close') return closeModal();
@@ -893,4 +1104,4 @@
     }
 
     try { if (sessionStorage.getItem(OPEN_STORAGE) === '1') open(); } catch (e) { }
-})();
+})();   

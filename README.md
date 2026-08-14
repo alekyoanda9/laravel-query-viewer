@@ -147,6 +147,23 @@ lalu menyediakan mekanisme mempromosikannya jadi file permanen.
 4. Dapat kode `TRC-YYYYMMDD-XXXX` → kirim ke developer.
 5. Developer buka `/{prefix}/trace/{kode}` → timeline lengkap.
 
+### Fase 1 — capture ter-kurasi (baru)
+
+Layar "Ambil Kasus" bukan lagi satu kotak catatan, tapi layar review:
+
+- **Kategori** — error / hasil tidak sesuai / aksi tidak terjadi / lambat. Dibedakan karena penanganan devnya beda; untuk bug non-error, tidak ada exception yang menandai lokasi masalah, jadi dev bersandar pada urutan step + lampiran.
+- **Deskripsi** multiline + **No. PRPK/Memo** opsional (dibersihkan dari karakter liar sebelum disimpan).
+- **Lampiran** gambar/video (upload, dibatasi jumlah/ukuran/mime; video besar sebaiknya link di deskripsi). Disajikan lewat route ber-gate, divalidasi harus benar-benar milik trace itu (anti path-traversal).
+- **Pilih langkah** yang disertakan (checkbox). Langkah yang di-exclude TIDAK dibuang — tetap tersimpan & tampil terlipat di viewer, karena "kukira noise ternyata itu bug-nya" sering terjadi.
+- **Grup** langkah, default per halaman asal (reuse `origin`), bisa di-relabel, bisa **dipisah manual** di tengah satu halaman (untuk bug seperti ganti-supplier-tanpa-refresh yang terjadi di satu URL), dan ditandai **"gagal di bagian ini"**.
+- **Titik gagal** — tandai satu langkah tempat seharusnya berhasil tapi gagal.
+
+Snapshot langkah **dibekukan di klien** saat layar dibuka, lalu dikirim balik saat submit — bukan dibaca ulang dari buffer. Karena buffer terus merekam di latar, membaca ulang saat submit berisiko mengambil kondisi yang sudah bergeser dari yang dilihat support.
+
+Buffer juga kini **mengabaikan request milik panel sendiri** (polling /recent, explain, capture, trace/*) supaya tidak cepat penuh oleh panggilan panel dan langkah setup yang lama tidak keburu tergeser keluar.
+
+Hasil capture memberi **link lengkap yang bisa diklik** (tombol Copy link), bukan cuma kode.
+
 ### Yang dilihat developer
 
 Header trace menonjolkan **koneksi/cabang** — penyebab nomor satu "kok di saya

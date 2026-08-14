@@ -542,6 +542,252 @@
             line-height: 1.5;
             outline: none;
         }
+
+        /* ---- layar review "Ambil Kasus" ---- */
+        .qd-cap-card {
+            width: 460px;
+            max-width: 94vw;
+            max-height: 88vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .qd-cap-scroll {
+            padding: 10px 12px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .qd-cap-hint {
+            font-size: 11px;
+            color: #9b9b93;
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+
+        .qd-cap-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            margin: 10px 0 3px;
+            color: #d9d9d2;
+        }
+
+        .qd-cap-opt {
+            font-weight: 400;
+            color: #8a8a82;
+        }
+
+        .qd-cap-input {
+            width: 100%;
+            padding: 6px 8px;
+            box-sizing: border-box;
+            font-size: 12px;
+            background: #2a2a26;
+            color: #eceae2;
+            border: 1px solid #46463f;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+
+        textarea.qd-cap-input {
+            resize: vertical;
+        }
+
+        .qd-cap-steps {
+            margin-top: 4px;
+        }
+
+        .qd-cap-group {
+            border: 1px solid #3a3a34;
+            border-radius: 5px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+
+        .qd-cap-group.failed {
+            border-color: #a44;
+        }
+
+        .qd-cap-ghead {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 8px;
+            background: #2d2d28;
+        }
+
+        .qd-cap-glabel {
+            flex: 1;
+            padding: 3px 6px;
+            font-size: 11.5px;
+            font-weight: 600;
+            background: #23231f;
+            color: #eceae2;
+            border: 1px solid #44443d;
+            border-radius: 3px;
+        }
+
+        .qd-cap-fail {
+            font-size: 10.5px;
+            color: #d98a8a;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            cursor: pointer;
+        }
+
+        .qd-cap-step {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-top: 1px solid #333;
+        }
+
+        .qd-cap-step.off {
+            opacity: .4;
+        }
+
+        .qd-cap-step.fp {
+            background: #3a2020;
+        }
+
+        .qd-cap-inc {
+            display: flex;
+        }
+
+        .qd-cap-m {
+            font-family: ui-monospace, monospace;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: #3a3a33;
+            color: #cfcfc6;
+        }
+
+        .qd-cap-m.POST,
+        .qd-cap-m.PUT,
+        .qd-cap-m.DELETE {
+            background: #4a2a2a;
+            color: #f0b6b6;
+        }
+
+        .qd-cap-p {
+            flex: 1;
+            font-family: ui-monospace, monospace;
+            font-size: 11px;
+            color: #cfcfc6;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .qd-cap-b {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+        }
+
+        .qd-cap-b.bad {
+            background: #4a2a2a;
+            color: #f0b6b6;
+        }
+
+        .qd-cap-fp {
+            font-size: 10px;
+            background: transparent;
+            border: 1px solid #55554e;
+            color: #b9b9b0;
+            border-radius: 3px;
+            padding: 1px 6px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .qd-cap-step.fp .qd-cap-fp {
+            border-color: #d14343;
+            color: #f0b6b6;
+        }
+
+        .qd-cap-split {
+            text-align: center;
+            font-size: 9.5px;
+            color: #7a7a72;
+            padding: 2px;
+            cursor: pointer;
+            border-top: 1px dashed #3a3a34;
+        }
+
+        .qd-cap-split:hover {
+            color: #cfcfc6;
+            background: #2a2a26;
+        }
+
+        .qd-cap-foot {
+            padding: 8px 12px;
+            border-top: 1px solid #333;
+        }
+
+        .qd-cap-submit {
+            width: 100%;
+            padding: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            background: #3a5a3a;
+            color: #eafeea;
+            border: 1px solid #4a704a;
+            border-radius: 4px;
+        }
+
+        .qd-cap-result {
+            margin-top: 10px;
+        }
+
+        .qd-cap-ok {
+            background: #243024;
+            border-radius: 5px;
+            padding: 10px;
+        }
+
+        .qd-cap-oklbl {
+            font-size: 10.5px;
+            color: #9b9b93;
+            margin-bottom: 3px;
+        }
+
+        .qd-cap-code {
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: .02em;
+            color: #eafeea;
+        }
+
+        .qd-cap-url {
+            font-size: 10px;
+            color: #8fbf8f;
+            word-break: break-all;
+            margin: 4px 0 6px;
+        }
+
+        .qd-cap-okbtns {
+            display: flex;
+            gap: 6px;
+        }
+
+        .qd-cap-okbtns button {
+            flex: 1;
+            padding: 5px;
+            font-size: 11px;
+            cursor: pointer;
+            background: #2f3f2f;
+            color: #eafeea;
+            border: 1px solid #4a704a;
+            border-radius: 4px;
+        }
     </style>
 
     <div id="qd-root">
@@ -573,25 +819,43 @@
             </div>
 
             <div class="qd-modal" data-qd="cap-modal" hidden>
-                <div class="qd-modal-card">
+                <div class="qd-modal-card qd-cap-card">
                     <div class="qd-modal-head">
                         <b>Ambil kasus ini</b>
                         <button data-qd="cap-close" title="Tutup">&times;</button>
                     </div>
-                    <div style="padding:10px 12px;font-size:12px;line-height:1.6">
-                        <div style="margin-bottom:6px;color:#9b9b93">
-                            Semua langkah yang terekam akan disimpan jadi satu trace berkode.
-                            Kirim kodenya ke developer.
+                    <div class="qd-cap-scroll">
+                        <div class="qd-cap-hint">
+                            Pilih langkah yang perlu dev jalankan untuk reproduce, kelompokkan
+                            kalau ada bagian-bagiannya, lalu tandai di mana yang gagal.
                         </div>
-                        <input type="text" data-qd="cap-note" maxlength="200"
-                               placeholder="Apa yang salah? (mis. kolom CBG kosong di laporan)"
-                               style="width:100%;padding:6px 8px;margin-bottom:8px">
-                        <label style="display:block;margin-bottom:8px">
-                            Langkah yang dicurigai:
-                            <select data-qd="cap-suspect" style="width:100%;padding:6px 8px;margin-top:4px"></select>
-                        </label>
-                        <button data-qd="cap-submit" style="width:100%;padding:7px">Simpan trace</button>
-                        <div data-qd="cap-result" style="margin-top:10px"></div>
+
+                        <label class="qd-cap-label">Kategori</label>
+                        <select data-qd="cap-category" class="qd-cap-input"></select>
+
+                        <label class="qd-cap-label">Deskripsi masalah</label>
+                        <textarea data-qd="cap-desc" rows="3" class="qd-cap-input"
+                            placeholder="Ceritakan apa yang terjadi vs yang seharusnya. Contoh: setelah add PLU di sheet 1, tombol add di sheet 2 tidak berfungsi."></textarea>
+
+                        <label class="qd-cap-label">No. PRPK / Memo <span class="qd-cap-opt">(opsional)</span></label>
+                        <input type="text" data-qd="cap-prpk" class="qd-cap-input" maxlength="60"
+                            placeholder="mis. prpk-1202 atau memo-455">
+
+                        <label class="qd-cap-label">Lampiran <span class="qd-cap-opt">(gambar / video —
+                                opsional)</span></label>
+                        <input type="file" data-qd="cap-files" class="qd-cap-input" multiple
+                            accept="image/*,video/mp4,video/webm">
+                        <div class="qd-cap-hint" style="margin-top:4px">
+                            Video besar sebaiknya tempel link-nya di deskripsi, bukan di-upload.
+                        </div>
+
+                        <label class="qd-cap-label">Langkah <span class="qd-cap-opt" data-qd="cap-count"></span></label>
+                        <div data-qd="cap-steps" class="qd-cap-steps"></div>
+
+                        <div data-qd="cap-result" class="qd-cap-result"></div>
+                    </div>
+                    <div class="qd-cap-foot">
+                        <button data-qd="cap-submit" class="qd-cap-submit">Simpan trace</button>
                     </div>
                 </div>
             </div>
@@ -620,6 +884,9 @@
             explainUrl: '{{ url('/dev/query-debug/explain') }}',
             captureUrl: '{{ url(config('querydebug.route_prefix', 'dev/query-debug') . '/trace/capture') }}',
             traceEnabled: {{ config('querydebug.trace.enabled', true) ? 'true' : 'false' }},
+            traceCategories: {!! json_encode(config('querydebug.trace.categories', []), JSON_UNESCAPED_UNICODE) !!},
+            maxAttachments: {{ (int) config('querydebug.trace.max_attachments', 6) }},
+            maxUploadKb: {{ (int) config('querydebug.trace.max_upload_kb', 5120) }},
             host: '{{ config('querydebug.host') }}',
             slowMs:         {{ (int) config('querydebug.slow_ms', 500) }},
             insight:        {{ config('querydebug.insight.enabled') ? 'true' : 'false' }},

@@ -90,6 +90,30 @@ return [
 
         'max_input_keys'    => 40,
         'max_value_length'  => 300,
+
+        /*
+        | Kategori bug yang bisa dipilih support saat capture. Dibedakan
+        | karena penanganan devnya beda: 'error' biasanya sudah kelihatan dari
+        | status/exception; 'perilaku-salah' & 'aksi-hilang' butuh dev baca
+        | urutan step + lampiran visual, karena tidak ada exception yang
+        | menandai di mana persisnya masalah terjadi.
+        */
+        'categories' => [
+            'error'          => 'Error / muncul pesan gagal',
+            'perilaku-salah' => 'Hasil tidak sesuai (nyangkut, tidak sinkron, dsb)',
+            'aksi-hilang'    => 'Aksi yang seharusnya terjadi tidak terjadi',
+            'lambat'         => 'Lambat / timeout',
+            'lainnya'        => 'Lainnya',
+        ],
+
+        // Lampiran gambar/video. Video besar sebaiknya di-host di luar (link),
+        // bukan upload — server testing bukan tempat penyimpanan media.
+        'max_attachments'     => 6,
+        'max_upload_kb'       => env('QUERY_DEBUG_TRACE_MAX_UPLOAD_KB', 5120), // 5 MB/file
+        'allowed_upload_mime' => [
+            'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+            'video/mp4', 'video/webm',
+        ],
     ],
 
     /*

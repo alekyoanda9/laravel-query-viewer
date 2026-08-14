@@ -64,6 +64,37 @@ class TraceStore
         return 'TRC-' . date('Ymd') . '-' . strtoupper(substr(md5(uniqid('', true)), 0, 6));
     }
 
+    /**
+     * Folder tempat file lampiran (upload) untuk satu trace disimpan. Berada
+     * di folder bulan yang sama dengan file JSON-nya, jadi retensi/pembersihan
+     * cukup dilakukan per-bulan tanpa index terpisah.
+     */
+    public static function attachmentDir(string $code): string
+    {
+        $month = substr($code, 4, 6); // YYYYMM
+        $month = substr($month, 0, 4) . '-' . substr($month, 4, 2);
+
+        return self::root() . '/' . $month . '/' . $code . '-files';
+    }
+
+    public static function putAttachment(string $code, string $filename, $contents): string
+    {
+        $path = self::attachmentDir($code) . '/' . $filename;
+        self::disk()->put($path, $contents);
+
+        return $path;
+    }
+
+    public static function attachmentStream(string $path)
+    {
+        return self::disk()->readStream($path);
+    }
+
+    public static function attachmentExists(string $path): bool
+    {
+        return self::disk()->exists($path);
+    }
+
     public static function put(array $trace): void
     {
         self::disk()->put(

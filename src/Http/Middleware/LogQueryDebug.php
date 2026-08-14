@@ -19,6 +19,17 @@ class LogQueryDebug
             return $next($request);
         }
 
+        // Panel query-viewer memoles dirinya sendiri lewat polling (/recent
+        // tiap beberapa detik) + endpoint lain (explain, unlock, capture,
+        // trace/*). Semua itu jalan lewat middleware grup 'web' yang sama,
+        // jadi TANPA pengecualian ini, tiap polling ikut kerekam sebagai
+        // "langkah" — buffer cepat penuh dengan panggilan panel sendiri,
+        // bukan aksi support yang sesungguhnya, dan step setup yang lama bisa
+        // tergeser keluar sebelum sempat di-capture.
+        if ($this->isOwnRequest($request)) {
+            return $next($request);
+        }
+
         $connection = Context::connectionName(); // null = koneksi default
         $collector  = new QueryCollector();
         $startedAt  = microtime(true);
@@ -210,6 +221,23 @@ class LogQueryDebug
         } catch (\Throwable $e) {
             return [];
         }
+    }
+
+    /**
+     * True kalau request ini menuju endpoint package sendiri (recent, explain,
+     * capture, trace/*, dst) — dikenali dari route_prefix, bukan daftar route
+     * eksplisit, supaya otomatis ikut kalau ada endpoint baru ditambah nanti.
+     */
+    private function isOwnRequest($request): bool
+    {
+        $prefix = trim((string) config('querydebug.route_prefix', 'dev/query-debug'), '/');
+        if ($prefix === '') {
+            return false;
+        }
+
+        $path = trim($request->path(), '/');
+
+        return $path === $prefix || strpos($path, $prefix . '/') === 0;
     }
 
     private function originKey($request): string
