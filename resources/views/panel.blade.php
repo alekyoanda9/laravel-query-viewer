@@ -318,6 +318,42 @@
             color: #fde68a;
         }
 
+        .qd-fail-badge {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #7f1d1d;
+            color: #fecaca;
+            font-weight: 600;
+        }
+
+        .qd-q.failed {
+            background: rgba(127, 29, 29, .12);
+        }
+
+        .qd-q-error {
+            font-size: 10.5px;
+            color: #fca5a5;
+            background: #1a0f12;
+            border: 1px solid #7f1d1d;
+            border-radius: 6px;
+            padding: 5px 7px;
+            margin-bottom: 5px;
+            word-break: break-word;
+        }
+
+        .qd-batch-error {
+            padding: 7px 10px;
+            background: #1a0f12;
+            border-top: 1px solid #7f1d1d;
+            border-bottom: 1px solid #7f1d1d;
+            font-size: 11px;
+            color: #fecaca;
+        }
+
+        .qd-batch-error b {
+            color: #fca5a5;
+        }
+
         .qd-conn {
             color: #64748b;
         }
@@ -552,12 +588,12 @@
     <meta name="qd-csrf" content="{{ csrf_token() }}">
     <script>
         window.QUERY_DEBUG = {
-            recentUrl:  '{{ url('/dev/query-debug/recent') }}',
-            clearUrl:   '{{ url('/dev/query-debug/clear') }}',
-            unlockUrl:  '{{ url('/dev/query-debug/unlock') }}',
-            lockUrl:    '{{ url('/dev/query-debug/lock') }}',
+            recentUrl: '{{ url('/dev/query-debug/recent') }}',
+            clearUrl: '{{ url('/dev/query-debug/clear') }}',
+            unlockUrl: '{{ url('/dev/query-debug/unlock') }}',
+            lockUrl: '{{ url('/dev/query-debug/lock') }}',
             explainUrl: '{{ url('/dev/query-debug/explain') }}',
-            host:       '{{ config('querydebug.host') }}',
+            host: '{{ config('querydebug.host') }}',
             slowMs:         {{ (int) config('querydebug.slow_ms', 500) }},
             insight:        {{ config('querydebug.insight.enabled') ? 'true' : 'false' }},
             explain:        {{ config('querydebug.insight.explain.enabled') ? 'true' : 'false' }},

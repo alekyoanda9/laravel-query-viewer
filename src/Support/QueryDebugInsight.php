@@ -105,6 +105,7 @@ class QueryDebugInsight
 
         $totalMs   = 0.0;
         $slowCount = 0;
+        $failedCount = 0;
         $byRaw     = [];
         $byTemplate = [];
 
@@ -116,6 +117,15 @@ class QueryDebugInsight
             $totalMs += $ms;
             if ($ms >= $slowMs) {
                 $slowCount++;
+            }
+
+            // Query yang gagal (lihat LogQueryDebug::recordFailedQuery) dihitung
+            // terpisah, bukan ikut dedup redundan/N+1 — satu kali gagal bukan
+            // "redundan", dan biasanya tidak berulang dengan pola binding yang
+            // konsisten seperti N+1 sungguhan.
+            if (! empty($query['failed'])) {
+                $failedCount++;
+                continue;
             }
 
             $rawKey = md5($raw);
@@ -172,6 +182,7 @@ class QueryDebugInsight
             'unique_count'    => count($byRaw),
             'total_ms'        => round($totalMs, 1),
             'slow_count'      => $slowCount,
+            'failed_count'    => $failedCount,
             'redundant_count' => $redundant,
             'repeated'        => array_slice($repeated, 0, $maxFindings),
             'n_plus_one'      => array_slice($nPlusOne, 0, $maxFindings),

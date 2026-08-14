@@ -215,18 +215,32 @@
         lines.push('**Waktu:** ' + (batch.at || '-'));
         if (CFG.host) lines.push('**Server:** ' + CFG.host);
 
+        if (batch.error) {
+            lines.push('**Status:** ERROR \u2014 ' + (batch.error.class || 'Exception'));
+        }
+
         return lines.join('\n');
     }
 
     function queryBlock(q, dup) {
         var head = (q.op || 'QUERY') + (q.table ? ' \u00b7 ' + q.table : '');
-        var out = '**' + head + '** \u2014 ' + Number(q.time_ms || 0).toFixed(1) + ' ms';
+        var out = '**' + head + '**';
+
+        if (q.failed) {
+            out += ' \u2014 **GAGAL**';
+        } else {
+            out += ' \u2014 ' + Number(q.time_ms || 0).toFixed(1) + ' ms';
+        }
 
         if (dup > 1) {
             out += ' \u00b7 dijalankan ' + dup + '\u00d7 identik dalam request ini';
         }
 
         out += '\n\n' + fence('sql', q.raw);
+
+        if (q.failed && q.error) {
+            out += '\n\n> **Error:** ' + q.error;
+        }
 
         var ex = explainCache[q.id];
         if (ex && ex.plan) {
@@ -238,14 +252,22 @@
     }
 
     function insightNote(batch) {
-        if (!batch.insight) return '';
         var parts = [];
-        if (batch.insight.slow_count) parts.push(batch.insight.slow_count + ' query lambat');
-        if (batch.insight.redundant_count) parts.push(batch.insight.redundant_count + ' redundan');
-        if (batch.insight.n_plus_one && batch.insight.n_plus_one.length) {
-            var f = batch.insight.n_plus_one[0];
-            parts.push('indikasi N+1' + (f.table ? ' di ' + f.table : '') + ' (\u00d7' + f.count + ')');
+
+        if (batch.error) {
+            parts.push('request error (' + (batch.error.class || 'Exception') + ')');
         }
+
+        if (batch.insight) {
+            if (batch.insight.failed_count) parts.push(batch.insight.failed_count + ' query gagal');
+            if (batch.insight.slow_count) parts.push(batch.insight.slow_count + ' query lambat');
+            if (batch.insight.redundant_count) parts.push(batch.insight.redundant_count + ' redundan');
+            if (batch.insight.n_plus_one && batch.insight.n_plus_one.length) {
+                var f = batch.insight.n_plus_one[0];
+                parts.push('indikasi N+1' + (f.table ? ' di ' + f.table : '') + ' (\u00d7' + f.count + ')');
+            }
+        }
+
         return parts.length ? ' \u2014 ' + parts.join(', ') : '';
     }
 
@@ -280,17 +302,27 @@
         openModal(md, filenameFor(batch, q.table));
     }
 
+    function errorBlock(batch) {
+        if (!batch.error) return '';
+        return '> **Request error (' + (batch.error.class || 'Exception') + '):** ' +
+            (batch.error.message || '(tanpa pesan)');
+    }
+
     function exportBatch(bi) {
         var batch = lastBatches[bi];
         if (!batch) return;
         var counts = dupCounts(batch);
         var queries = batch.queries || [];
         var totalMs = queries.reduce(function (a, q) { return a + parseFloat(q.time_ms || 0); }, 0);
+        var err = errorBlock(batch);
 
         var md = '## Query Viewer \u2014 ' + (batch.route || ('/' + originOf(batch))) + '\n\n' +
             metaBlock(batch, true) + '\n\n' +
+            (err ? err + '\n\n' : '') +
             '_' + queries.length + ' query, total ' + totalMs.toFixed(1) + ' ms' + insightNote(batch) + '_\n\n' +
-            queries.map(function (q) { return queryBlock(q, counts[q.raw]); }).join('\n\n---\n\n');
+            (queries.length
+                ? queries.map(function (q) { return queryBlock(q, counts[q.raw]); }).join('\n\n---\n\n')
+                : '_(request ini error sebelum sempat menjalankan query apa pun)_');
 
         openModal(md, filenameFor(batch));
     }
@@ -320,9 +352,13 @@
 
         items.forEach(function (b, idx) {
             var counts = dupCounts(b);
+            var itemErr = errorBlock(b);
             md += '### ' + (idx + 1) + '. ' + b.method + ' /' + b.path +
                 (b.is_ajax ? ' (AJAX)' : '') + insightNote(b) + '\n\n' +
-                (b.queries || []).map(function (q) { return queryBlock(q, counts[q.raw]); }).join('\n\n') +
+                (itemErr ? itemErr + '\n\n' : '') +
+                ((b.queries || []).length
+                    ? (b.queries || []).map(function (q) { return queryBlock(q, counts[q.raw]); }).join('\n\n')
+                    : '_(request ini error sebelum sempat menjalankan query apa pun)_') +
                 '\n\n';
         });
 
@@ -407,13 +443,16 @@
         if (insight.slow_count > 0) {
             chips += '<span class="qd-chip danger">' + insight.slow_count + ' lambat</span>';
         }
+        if (insight.failed_count > 0) {
+            chips += '<span class="qd-chip danger">' + insight.failed_count + ' gagal</span>';
+        }
         if (insight.redundant_count > 0) {
             chips += '<span class="qd-chip warn">' + insight.redundant_count + ' redundan</span>';
         }
         if (insight.n_plus_one && insight.n_plus_one.length) {
             chips += '<span class="qd-chip danger">indikasi N+1</span>';
         }
-        if (!insight.slow_count && !insight.redundant_count &&
+        if (!insight.slow_count && !insight.failed_count && !insight.redundant_count &&
             (!insight.n_plus_one || !insight.n_plus_one.length)) {
             chips += '<span class="qd-chip ok">bersih</span>';
         }
@@ -469,27 +508,40 @@
             if (matchesFilter(q, counts[q.raw])) visible.push({ q: q, qi: qi });
         });
 
-        if (!visible.length) return null;
+        // Batch yang error tetap ditampilkan walau tidak ada query yang lolos
+        // filter (termasuk kasus request 500 tanpa sempat menjalankan query
+        // apa pun) — hanya batch normal-kosong yang di-skip.
+        if (!visible.length && !batch.error) return null;
 
         var totalMs = all.reduce(function (a, q) { return a + parseFloat(q.time_ms || 0); }, 0);
         var bkey = batchKey(batch);
         var collapsed = !!collapsedBatches[bkey];
         var label = batch.route ? esc(batch.route) : ('/' + esc(batch.path));
 
-        var html = '<div class="qd-batch" data-bi="' + bi + '">';
+        var html = '<div class="qd-batch' + (batch.error ? ' has-error' : '') + '" data-bi="' + bi + '">';
 
         html += '<div class="qd-batch-head" data-qd="toggle" data-bkey="' + esc(bkey) + '">' +
             '<span class="qd-caret">' + (collapsed ? '\u25b8' : '\u25be') + '</span>' +
             '<span class="qd-tag ' + (batch.is_ajax ? 'ajax' : '') + '">' +
             esc(batch.method) + (batch.is_ajax ? ' \u00b7 AJAX' : '') + '</span>' +
             '<span class="qd-path" title="/' + esc(batch.path) + '">' + label + '</span>' +
+            (batch.error ? '<span class="qd-fail-badge" title="' + esc(batch.error.message || '') + '">ERROR</span>' : '') +
             '<button class="qd-mini" data-qd="export-batch" data-bi="' + bi + '" title="Export seluruh request ini ke tiket">MD</button>' +
             '<span class="qd-tag">' + all.length + ' q \u00b7 ' + totalMs.toFixed(1) + ' ms</span>' +
             '</div>';
 
+        if (batch.error) {
+            html += '<div class="qd-batch-error"><b>' + esc(batch.error.class || 'Exception') + ':</b> ' +
+                esc(batch.error.message || '(tanpa pesan)') + '</div>';
+        }
+
         html += renderInsight(batch.insight);
 
         html += '<div class="qd-batch-queries"' + (collapsed ? ' hidden' : '') + '>';
+
+        if (!visible.length) {
+            html += '<div class="qd-empty">(request ini error sebelum sempat menjalankan query apa pun)</div>';
+        }
 
         visible.forEach(function (item) {
             var q = item.q;
@@ -498,9 +550,14 @@
             var slow = ms >= (CFG.slowMs || 500);
             var dup = counts[q.raw] > 1;
 
-            html += '<div class="qd-q">' +
+            html += '<div class="qd-q' + (q.failed ? ' failed' : '') + '">' +
+                (q.failed
+                    ? '<div class="qd-q-error"><b>Query ini gagal:</b> ' + esc(q.error || '(tanpa pesan)') + '</div>'
+                    : '') +
                 '<div class="qd-q-meta">' +
-                '<span class="qd-ms ' + (slow ? 'slow' : '') + '">' + ms.toFixed(1) + ' ms</span>' +
+                (q.failed
+                    ? '<span class="qd-fail-badge">GAGAL</span>'
+                    : '<span class="qd-ms ' + (slow ? 'slow' : '') + '">' + ms.toFixed(1) + ' ms</span>') +
                 (q.op ? '<span class="qd-conn">' + esc(q.op) + (q.table ? ' ' + esc(q.table) : '') + '</span>' : '') +
                 (dup ? '<span class="qd-dup">\u00d7' + counts[q.raw] + ' duplikat</span>' : '') +
                 '<span class="qd-conn">' + esc(q.connection || '') + '</span>' +
@@ -508,10 +565,10 @@
                 '<div class="qd-sql">' +
                 '<div class="qd-actions">' +
                 '<button data-qd="md" data-bi="' + bi + '" data-qi="' + item.qi + '" title="Export query ini ke tiket">MD</button>' +
-                (CFG.explain && qid
+                (CFG.explain && qid && !q.failed
                     ? '<button data-qd="explain" data-bi="' + bi + '" data-qi="' + item.qi + '" data-qid="' + esc(qid) + '">Explain</button>'
                     : '') +
-                (CFG.explainAnalyze && qid
+                (CFG.explainAnalyze && qid && !q.failed
                     ? '<button data-qd="explain-analyze" data-bi="' + bi + '" data-qi="' + item.qi + '" data-qid="' + esc(qid) + '" title="Menjalankan query-nya sungguhan di dalam transaksi yang langsung di-rollback">Analyze</button>'
                     : '') +
                 '<button class="qd-copy" data-qd="copy">Copy</button>' +
@@ -523,6 +580,7 @@
         });
 
         html += '</div></div>';
+
 
         return { html: html, count: all.length, ms: totalMs };
     }
