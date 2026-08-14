@@ -23,11 +23,5 @@
         }
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "git@gitlab.internal:tim/laravel-query-viewer.git"
-        }
-    ]
+    "prefer-stable": true
 }
