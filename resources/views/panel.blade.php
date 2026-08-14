@@ -1,0 +1,569 @@
+@if(config('querydebug.enabled') && request()->getHost() === config('querydebug.host'))
+    <style>
+        #qd-root {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            z-index: 99999;
+            font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+        }
+
+        #qd-fab {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            background: #1f2937;
+            color: #fff;
+            font-size: 18px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, .3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #qd-fab .qd-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 9px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 11px;
+            line-height: 18px;
+            text-align: center;
+            display: none;
+        }
+
+        #qd-panel {
+            position: absolute;
+            right: 0;
+            bottom: 60px;
+            width: 520px;
+            max-width: 92vw;
+            height: 620px;
+            max-height: 80vh;
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 12px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #qd-panel[hidden] {
+            display: none;
+        }
+
+        .qd-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+        }
+
+        .qd-head b {
+            font-size: 13px;
+            flex: 1;
+        }
+
+        .qd-head button {
+            background: #334155;
+            color: #cbd5e1;
+            border: none;
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .qd-head button:hover {
+            background: #475569;
+        }
+
+        .qd-search {
+            padding: 8px 12px;
+            background: #0f172a;
+            border-bottom: 1px solid #1e293b;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .qd-search input[type="text"] {
+            flex: 1;
+            min-width: 0;
+            box-sizing: border-box;
+            background: #1e293b;
+            color: #e2e8f0;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 12px;
+        }
+
+        .qd-search label {
+            font-size: 11px;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+
+        .qd-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 10px;
+        }
+
+        .qd-keyform {
+            padding: 20px;
+            text-align: center;
+        }
+
+        .qd-keyform input {
+            width: 100%;
+            box-sizing: border-box;
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #334155;
+            background: #1e293b;
+            color: #fff;
+        }
+
+        .qd-keyform button {
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            cursor: pointer;
+        }
+
+        .qd-err {
+            color: #f87171;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        /* ---- grup per halaman asal ---- */
+
+        .qd-group {
+            margin-bottom: 12px;
+        }
+
+        .qd-group-head {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            background: #172033;
+            border: 1px solid #334155;
+            border-radius: 7px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .qd-group-head .qd-caret {
+            color: #64748b;
+            font-size: 10px;
+            width: 10px;
+        }
+
+        .qd-group-path {
+            flex: 1;
+            color: #7dd3fc;
+            font-weight: 600;
+            word-break: break-all;
+        }
+
+        .qd-group-body {
+            padding: 8px 0 0 8px;
+        }
+
+        .qd-group-body[hidden] {
+            display: none;
+        }
+
+        /* ---- batch ---- */
+
+        .qd-batch {
+            border: 1px solid #1e293b;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .qd-batch-head {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 10px;
+            background: #1e293b;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .qd-batch-head .qd-path {
+            flex: 1;
+            color: #93c5fd;
+            word-break: break-all;
+        }
+
+        .qd-batch-queries[hidden] {
+            display: none;
+        }
+
+        .qd-tag {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #334155;
+            color: #cbd5e1;
+        }
+
+        .qd-tag.ajax {
+            background: #4c1d95;
+            color: #ddd6fe;
+        }
+
+        /* ---- insight ---- */
+
+        .qd-insight {
+            padding: 7px 10px;
+            background: #101a2e;
+            border-top: 1px solid #1e293b;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .qd-chip {
+            font-size: 10.5px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            background: #1e293b;
+            color: #cbd5e1;
+        }
+
+        .qd-chip.warn {
+            background: #78350f;
+            color: #fde68a;
+        }
+
+        .qd-chip.danger {
+            background: #7f1d1d;
+            color: #fecaca;
+        }
+
+        .qd-chip.ok {
+            background: #14532d;
+            color: #bbf7d0;
+        }
+
+        .qd-finding {
+            width: 100%;
+            font-size: 10.5px;
+            color: #94a3b8;
+            padding-left: 2px;
+            word-break: break-all;
+        }
+
+        .qd-finding code {
+            color: #cbd5e1;
+        }
+
+        /* ---- query ---- */
+
+        .qd-q {
+            border-top: 1px solid #1e293b;
+            padding: 8px 10px;
+        }
+
+        .qd-q-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: #94a3b8;
+            margin-bottom: 5px;
+        }
+
+        .qd-ms {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #14532d;
+            color: #bbf7d0;
+        }
+
+        .qd-ms.slow {
+            background: #7f1d1d;
+            color: #fecaca;
+        }
+
+        .qd-dup {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #78350f;
+            color: #fde68a;
+        }
+
+        .qd-conn {
+            color: #64748b;
+        }
+
+        .qd-sql {
+            position: relative;
+        }
+
+        .qd-sql pre {
+            margin: 0;
+            background: #020617;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            padding: 8px 8px;
+            font-size: 11.5px;
+            line-height: 1.5;
+            color: #e2e8f0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 220px;
+            overflow: auto;
+        }
+
+        .qd-actions {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            display: flex;
+            gap: 4px;
+        }
+
+        .qd-actions button {
+            background: #334155;
+            color: #cbd5e1;
+            border: none;
+            border-radius: 5px;
+            padding: 3px 8px;
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .qd-actions button:hover {
+            background: #475569;
+        }
+
+        .qd-copy.ok {
+            background: #16a34a;
+            color: #fff;
+        }
+
+        .qd-explain-out {
+            margin-top: 6px;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .qd-explain-out .qd-explain-head {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            background: #172033;
+            font-size: 10.5px;
+            color: #94a3b8;
+        }
+
+        .qd-explain-out .qd-explain-head b {
+            flex: 1;
+            color: #7dd3fc;
+            font-weight: 600;
+        }
+
+        .qd-explain-out pre {
+            margin: 0;
+            background: #020617;
+            border: none;
+            border-radius: 0;
+            padding: 8px;
+            font-size: 11px;
+            line-height: 1.45;
+            color: #d1fae5;
+            white-space: pre;
+            overflow: auto;
+            max-height: 260px;
+        }
+
+        .qd-explain-out.err pre {
+            color: #fecaca;
+            white-space: pre-wrap;
+        }
+
+        .qd-empty {
+            text-align: center;
+            color: #64748b;
+            font-size: 12px;
+            padding: 30px 10px;
+        }
+
+        /* ---- tombol mini export di header ---- */
+
+        .qd-mini {
+            background: #334155;
+            color: #cbd5e1;
+            border: none;
+            border-radius: 5px;
+            padding: 1px 7px;
+            font-size: 10.5px;
+            cursor: pointer;
+        }
+
+        .qd-mini:hover {
+            background: #475569;
+        }
+
+        /* ---- modal export tiket ---- */
+
+        .qd-modal {
+            position: absolute;
+            inset: 0;
+            background: rgba(2, 6, 23, .85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            z-index: 5;
+        }
+
+        .qd-modal[hidden] {
+            display: none;
+        }
+
+        .qd-modal-card {
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 10px;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .qd-modal-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            font-size: 12px;
+        }
+
+        .qd-modal-head b {
+            flex: 1;
+        }
+
+        .qd-modal-head button {
+            background: #334155;
+            color: #cbd5e1;
+            border: none;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .qd-modal-head button:hover {
+            background: #475569;
+        }
+
+        .qd-modal-head button.ok {
+            background: #16a34a;
+            color: #fff;
+        }
+
+        .qd-modal textarea {
+            flex: 1;
+            border: none;
+            resize: none;
+            background: #020617;
+            color: #e2e8f0;
+            padding: 10px;
+            font-family: ui-monospace, Menlo, Consolas, monospace;
+            font-size: 11.5px;
+            line-height: 1.5;
+            outline: none;
+        }
+    </style>
+
+    <div id="qd-root">
+        <button id="qd-fab" title="Query Viewer">
+            &lt;/&gt;
+            <span class="qd-badge">0</span>
+        </button>
+
+        <div id="qd-panel" hidden>
+            <div class="qd-head">
+                <b>Query Viewer</b>
+                <button data-qd="refresh">Refresh</button>
+                <button data-qd="clear">Clear</button>
+                <button data-qd="lock" title="Matikan pengumpulan query untuk sesi ini">Lock</button>
+                <button data-qd="close">&times;</button>
+            </div>
+            <div class="qd-search">
+                <input type="text" placeholder="Filter query (tabel, kata kunci)..." data-qd="filter">
+                <label title="Hanya tampilkan query di atas ambang slow_ms">
+                    <input type="checkbox" data-qd="slowonly"> lambat
+                </label>
+                <label title="Hanya tampilkan query yang dijalankan lebih dari sekali dalam satu request">
+                    <input type="checkbox" data-qd="duponly"> duplikat
+                </label>
+            </div>
+            <div class="qd-body">
+                <div class="qd-empty">Memuat...</div>
+            </div>
+
+            <div class="qd-modal" data-qd="modal" hidden>
+                <div class="qd-modal-card">
+                    <div class="qd-modal-head">
+                        <b>Export tiket (Markdown)</b>
+                        <button data-qd="md-copy">Copy</button>
+                        <button data-qd="md-download">Download .md</button>
+                        <button data-qd="md-close" title="Tutup">&times;</button>
+                    </div>
+                    <textarea data-qd="md-text" readonly spellcheck="false"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <meta name="qd-csrf" content="{{ csrf_token() }}">
+    <script>
+        window.QUERY_DEBUG = {
+            recentUrl:  '{{ url('/dev/query-debug/recent') }}',
+            clearUrl:   '{{ url('/dev/query-debug/clear') }}',
+            unlockUrl:  '{{ url('/dev/query-debug/unlock') }}',
+            lockUrl:    '{{ url('/dev/query-debug/lock') }}',
+            explainUrl: '{{ url('/dev/query-debug/explain') }}',
+            host:       '{{ config('querydebug.host') }}',
+            slowMs:         {{ (int) config('querydebug.slow_ms', 500) }},
+            insight:        {{ config('querydebug.insight.enabled') ? 'true' : 'false' }},
+            explain:        {{ config('querydebug.insight.explain.enabled') ? 'true' : 'false' }},
+            explainAnalyze: {{ (config('querydebug.insight.explain.enabled') && config('querydebug.insight.explain.analyze')) ? 'true' : 'false' }},
+            pollMs: 2500
+        };
+    </script>
+    <script src="{{ asset('vendor/query-viewer/query-debug.js') }}"></script>
+@endif

@@ -1,0 +1,163 @@
+# Laravel Query Viewer (internal)
+
+Floating panel untuk melihat raw SQL query per halaman di **server testing**:
+grouping per menu, deteksi N+1/redundan, EXPLAIN on-demand (PostgreSQL), dan
+export tiket bug berformat Markdown. Diturunkan dari fitur internal IAS-PHP,
+lalu dilepas dari konvensi app-nya supaya bisa dipasang di banyak aplikasi
+Laravel tim.
+
+> **Hanya untuk lingkungan testing/terkontrol.** Panel menampilkan raw SQL
+> beserta nilai binding. Jangan pernah `QUERY_DEBUG_ENABLED=true` di production.
+
+---
+
+## 1. Pasang
+
+Package ini privat (tidak di Packagist publik). Pilih salah satu cara
+distribusi (lihat §6), lalu di aplikasi konsumen:
+
+```bash
+composer require --dev sd1/laravel-query-viewer
+```
+
+`--dev` karena ini alat testing, tidak ikut ke build production.
+
+Publikasikan config + asset JS:
+
+```bash
+php artisan vendor:publish --tag=query-viewer-config
+php artisan vendor:publish --tag=query-viewer-assets
+# opsional, kalau mau meng-override tampilan panel:
+# php artisan vendor:publish --tag=query-viewer-views
+```
+
+`--tag=query-viewer-assets` menyalin `query-debug.js` ke
+`public/vendor/query-viewer/`. **Ulangi perintah asset ini setiap kali
+package di-update**, atau otomatiskan lewat script composer `post-update-cmd`.
+
+---
+
+## 2. Konfigurasi `.env`
+
+```dotenv
+QUERY_DEBUG_ENABLED=true
+QUERY_DEBUG_HOST=172.20.28.34        # host server testing; kosongkan = semua host (hati-hati)
+QUERY_DEBUG_KEY=key-acak-panjang     # untuk unlock panel
+
+QUERY_DEBUG_INSIGHT=true             # ringkasan N+1/redundan
+QUERY_DEBUG_EXPLAIN=true             # tombol EXPLAIN (PostgreSQL)
+QUERY_DEBUG_EXPLAIN_ANALYZE=false    # EXPLAIN ANALYZE mengeksekusi query — biarkan false
+```
+
+Semua opsi lain (slow_ms, ttl, threshold, dsb) ada di `config/querydebug.php`.
+
+---
+
+## 3. Sambungkan ke aplikasi (opsional, tapi penting untuk app non-standar)
+
+Package punya default yang jalan untuk app "biasa" (koneksi tunggal + auth
+Laravel standar). Untuk app dengan koneksi per-session / konvensi user sendiri
+(seperti IAS-PHP), daftarkan closure di `AppServiceProvider::boot()`:
+
+```php
+use Sd1\QueryViewer\QueryViewer;
+
+public function boot()
+{
+    // Koneksi DB mana yang query-nya didengarkan (null = default app).
+    QueryViewer::connectionUsing(function () {
+        return session('connection');
+    });
+
+    // Kunci pemilik store, supaya batch antar-user tidak tercampur.
+    QueryViewer::identifyUsing(function () {
+        return session('usid') ?: 'guest';
+    });
+
+    // Metadata yang muncul di header tiket export.
+    QueryViewer::contextUsing(function () {
+        return [
+            ['label' => 'Cabang (IGR)', 'value' => session('kdigr')],
+            ['label' => 'User',         'value' => session('usid')],
+        ];
+    });
+}
+```
+
+> **PHP 7.1 (IAS-PHP):** gunakan `function () { return ...; }`, **bukan**
+> arrow function `fn () => ...` (baru ada di PHP 7.4).
+
+Closure sengaja **tidak** ditaruh di file config: closure tidak bisa
+di-serialize, jadi menaruhnya di config akan membuat `php artisan config:cache`
+gagal. Menaruhnya di service provider aman terhadap config cache.
+
+Kalau app menyimpan metadata di session dan tidak butuh logika, cukup isi
+`config('querydebug.export.extra_session')` tanpa menulis closure.
+
+---
+
+## 4. Menampilkan panel
+
+Default: `auto_inject` menyisipkan panel otomatis sebelum `</body>` pada tiap
+response HTML — **tim tidak perlu menyentuh layout**. Matikan dengan
+`QUERY_DEBUG_AUTO_INJECT=false` kalau mau memasang sendiri:
+
+```blade
+{{-- sebelum </body> di layout utama --}}
+@include('querydebug::panel')
+```
+
+---
+
+## 5. Cara pakai (QA/support)
+
+1. Klik FAB `</>` di kanan-bawah (muncul hanya di host testing).
+2. Masukkan API key → panel mulai mengumpulkan query untuk sesi ini.
+3. Buka/jalankan menu; query mengelompok per halaman.
+4. Export ke tiket: tombol **MD** di query (satu query), header request (satu
+   request), atau header grup (seluruh alur halaman). **Explain** dulu bila
+   ingin query plan ikut ke tiket.
+5. **Lock** untuk berhenti mengumpulkan + membersihkan.
+
+---
+
+## 6. Distribusi (pilih salah satu)
+
+**a. VCS repo privat (paling umum).** Push package ke GitLab/GitHub internal,
+lalu di composer.json app konsumen:
+
+```json
+{
+  "repositories": [
+    { "type": "vcs", "url": "git@gitlab.internal:tim/laravel-query-viewer.git" }
+  ]
+}
+```
+
+Beri versi lewat git tag (`git tag v1.0.0 && git push --tags`), lalu
+`composer require --dev sd1/laravel-query-viewer:^1.0`.
+
+**b. Private Packagist / Satis.** Kalau tim punya banyak package internal,
+jalankan Satis atau langganan Private Packagist supaya `composer require` jalan
+tanpa blok `repositories` di tiap app.
+
+**c. Path repo (untuk dev lokal antar-folder bersebelahan).**
+
+```json
+{
+  "repositories": [
+    { "type": "path", "url": "../laravel-query-viewer" }
+  ]
+}
+```
+
+---
+
+## 7. Kompatibilitas
+
+- PHP `>= 7.1` (kode tidak memakai fitur > 7.1).
+- Laravel `5.8` sampai `11` secara sintaks; **tes di tiap versi yang benar-benar
+  kamu pakai** sebelum menyebar luas — API framework yang dipakai
+  (`pushMiddlewareToGroup`, `aliasMiddleware`, `loadRoutesFrom`) stabil di
+  rentang itu, tapi verifikasi tetap perlu.
+- EXPLAIN hanya untuk koneksi **PostgreSQL**.
