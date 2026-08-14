@@ -9,6 +9,7 @@ use Sd1\QueryViewer\Support\Context;
 use Sd1\QueryViewer\Support\QueryCollector;
 use Sd1\QueryViewer\Support\QueryDebugSql;
 use Sd1\QueryViewer\Support\QueryDebugStore;
+use Sd1\QueryViewer\Support\StepRedactor;
 
 class LogQueryDebug
 {
@@ -20,6 +21,8 @@ class LogQueryDebug
 
         $connection = Context::connectionName(); // null = koneksi default
         $collector  = new QueryCollector();
+        $startedAt  = microtime(true);
+        $status     = null;
 
         DB::connection($connection)->listen(function ($query) use ($collector) {
             $collector->record([
@@ -35,65 +38,35 @@ class LogQueryDebug
         try {
             $response = $next($request);
 
-            // PENTING: untuk error yang terjadi di dalam controller, $next()
-            // TIDAK melempar exception. Routing pipeline Laravel menangkap
-            // exception itu di dalam dirinya, me-render-nya lewat
-            // ExceptionHandler, lalu MENGEMBALIKAN response 500 sebagai nilai
-            // biasa — sambil menempelkan exception aslinya ke response lewat
-            // $response->withException($e) (tersimpan di $response->exception).
-            //
-            // Jadi cara yang benar mendeteksi error di sini BUKAN menunggu
-            // catch di bawah (yang praktis tidak pernah kena untuk error
-            // controller), melainkan memeriksa response yang dikembalikan.
-            $exception = $this->exceptionFromResponse($response);
-
-            if ($exception !== null) {
-                // Kalau errornya query SQL yang gagal, DB::listen() tidak
-                // pernah fire untuknya — jadi rekam manual dari exception.
-                if ($exception instanceof QueryException) {
-                    $this->recordFailedQuery($collector, $exception);
-                }
-
-                $requestError = $this->describeError($exception);
+            if (method_exists($response, 'getStatusCode')) {
+                $status = $response->getStatusCode();
             }
 
             return $response;
         } catch (QueryException $e) {
-            // Fallback: hanya kena kalau exception BENAR-BENAR lolos sampai
-            // sini (mis. ExceptionHandler tidak ter-bind, atau exception
-            // dilempar dari middleware lain di luar destination). Untuk alur
-            // normal, cabang ini tidak dieksekusi.
+            // Query yang GAGAL tidak pernah memicu listen() di atas — Laravel
+            // hanya melempar event QueryExecuted untuk query yang berhasil.
+            // Query-query lain yang sukses SEBELUM ini tetap ada di $collector
+            // (listener fire real-time per query), jadi di sini kita cuma
+            // perlu menambahkan satu entri untuk query yang gagal itu sendiri,
+            // diambil dari SQL + bindings yang menempel di exception-nya.
             $this->recordFailedQuery($collector, $e);
             $requestError = $this->describeError($e);
             throw $e;
         } catch (\Throwable $e) {
+            // Exception non-DB (validasi, logic error, dsb). Tidak ada query
+            // spesifik untuk direkam, tapi request-nya sendiri tetap dicatat
+            // sebagai error di level batch supaya kelihatan di panel.
             $requestError = $this->describeError($e);
             throw $e;
         } finally {
-            // finally SELALU jalan — request sukses, response ber-error, query
-            // gagal, maupun exception yang benar-benar lolos.
-            $this->flush($request, $collector, $connection, $requestError);
+            // finally SELALU jalan — baik request sukses, query gagal, maupun
+            // exception lain — jadi flush tidak lagi ikut lenyap kalau
+            // request-nya error. Ini yang memperbaiki gap sebelumnya: dulu
+            // flush ada SETELAH `$next($request)`, jadi kalau itu throw,
+            // baris flush tidak pernah dieksekusi sama sekali.
+            $this->flush($request, $collector, $connection, $requestError, $status, $startedAt);
         }
-    }
-
-    /**
-     * Ambil exception asli yang ditempelkan Laravel ke response saat error
-     * di-render oleh routing pipeline (via $response->withException()).
-     * Mengembalikan null kalau response ini bukan hasil error.
-     *
-     * @return \Throwable|null
-     */
-    private function exceptionFromResponse($response)
-    {
-        if (
-            is_object($response)
-            && isset($response->exception)
-            && $response->exception instanceof \Throwable
-        ) {
-            return $response->exception;
-        }
-
-        return null;
     }
 
     /**
@@ -146,11 +119,12 @@ class LogQueryDebug
     /**
      * @param array|null $requestError ['class' => string, 'message' => string] kalau request ini error
      */
-    private function flush($request, QueryCollector $collector, $connection, $requestError): void
+    private function flush($request, QueryCollector $collector, $connection, $requestError, $status = null, $startedAt = null): void
     {
-        // Tetap push walau query KOSONG asalkan request-nya error — supaya
-        // "halaman ini 500 tanpa sempat menjalankan query apa pun" pun tetap
-        // kelihatan di panel, bukan cuma senyap.
+        // Dulu syaratnya cuma count() > 0. Sekarang tetap push walau query
+        // KOSONG asalkan request-nya error — supaya "halaman ini 500 tanpa
+        // sempat menjalankan query apa pun" pun tetap kelihatan di panel,
+        // bukan cuma senyap.
         if ($collector->count() === 0 && $requestError === null) {
             return;
         }
@@ -165,6 +139,13 @@ class LogQueryDebug
             'is_ajax' => $request->ajax() ? 1 : 0,
             'at'      => date('Y-m-d H:i:s'),
 
+            // --- tiga field di bawah ini yang mengubah "batch query" jadi
+            // "step yang bisa direproduksi". Tanpa input, dev cuma tahu halaman
+            // apa yang dibuka, bukan filter/nilai apa yang dipakai.
+            'input'    => StepRedactor::input($this->safeInput($request)),
+            'status'   => $status,
+            'dur_ms'   => $startedAt ? (int) round((microtime(true) - $startedAt) * 1000) : null,
+
             // Koneksi + metadata tiket, di-snapshot SAAT query jalan.
             'conn'    => is_string($connection) && $connection !== ''
                 ? $connection
@@ -176,6 +157,26 @@ class LogQueryDebug
 
             'queries' => $collector->all(),
         ]);
+    }
+
+    /**
+     * Ambil input request dengan aman. Dibungkus try/catch karena request
+     * dengan body non-parseable (JSON rusak, multipart aneh) bisa melempar —
+     * dan middleware debug TIDAK BOLEH mematikan request aslinya.
+     */
+    private function safeInput($request): array
+    {
+        if (! (bool) config('querydebug.trace.capture_input', true)) {
+            return [];
+        }
+
+        try {
+            $input = $request->except(['_token']);
+
+            return is_array($input) ? $input : [];
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     private function originKey($request): string
@@ -228,6 +229,8 @@ class LogQueryDebug
 
     /**
      * Aktif hanya kalau: fitur enable + host cocok + sesi sudah unlock.
+     * "Koneksi sudah dipilih" tidak lagi jadi syarat wajib di sini karena
+     * bisa saja app pakai koneksi default (Context mengembalikan null).
      */
     private function active($request): bool
     {

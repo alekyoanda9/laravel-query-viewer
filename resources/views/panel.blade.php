@@ -555,6 +555,7 @@
                 <b>Query Viewer</b>
                 <button data-qd="refresh">Refresh</button>
                 <button data-qd="clear">Clear</button>
+                <button data-qd="capture" title="Simpan langkah-langkah terakhir jadi trace untuk dev">Ambil Kasus</button>
                 <button data-qd="lock" title="Matikan pengumpulan query untuk sesi ini">Lock</button>
                 <button data-qd="close">&times;</button>
             </div>
@@ -569,6 +570,30 @@
             </div>
             <div class="qd-body">
                 <div class="qd-empty">Memuat...</div>
+            </div>
+
+            <div class="qd-modal" data-qd="cap-modal" hidden>
+                <div class="qd-modal-card">
+                    <div class="qd-modal-head">
+                        <b>Ambil kasus ini</b>
+                        <button data-qd="cap-close" title="Tutup">&times;</button>
+                    </div>
+                    <div style="padding:10px 12px;font-size:12px;line-height:1.6">
+                        <div style="margin-bottom:6px;color:#9b9b93">
+                            Semua langkah yang terekam akan disimpan jadi satu trace berkode.
+                            Kirim kodenya ke developer.
+                        </div>
+                        <input type="text" data-qd="cap-note" maxlength="200"
+                               placeholder="Apa yang salah? (mis. kolom CBG kosong di laporan)"
+                               style="width:100%;padding:6px 8px;margin-bottom:8px">
+                        <label style="display:block;margin-bottom:8px">
+                            Langkah yang dicurigai:
+                            <select data-qd="cap-suspect" style="width:100%;padding:6px 8px;margin-top:4px"></select>
+                        </label>
+                        <button data-qd="cap-submit" style="width:100%;padding:7px">Simpan trace</button>
+                        <div data-qd="cap-result" style="margin-top:10px"></div>
+                    </div>
+                </div>
             </div>
 
             <div class="qd-modal" data-qd="modal" hidden>
@@ -593,6 +618,8 @@
             unlockUrl: '{{ url('/dev/query-debug/unlock') }}',
             lockUrl: '{{ url('/dev/query-debug/lock') }}',
             explainUrl: '{{ url('/dev/query-debug/explain') }}',
+            captureUrl: '{{ url(config('querydebug.route_prefix', 'dev/query-debug') . '/trace/capture') }}',
+            traceEnabled: {{ config('querydebug.trace.enabled', true) ? 'true' : 'false' }},
             host: '{{ config('querydebug.host') }}',
             slowMs:         {{ (int) config('querydebug.slow_ms', 500) }},
             insight:        {{ config('querydebug.insight.enabled') ? 'true' : 'false' }},

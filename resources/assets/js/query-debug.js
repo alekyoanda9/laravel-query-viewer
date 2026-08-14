@@ -16,6 +16,7 @@
     var slowOnlyInput = panel.querySelector('[data-qd="slowonly"]');
     var dupOnlyInput = panel.querySelector('[data-qd="duponly"]');
     var modal = panel.querySelector('[data-qd="modal"]');
+    var capModal = panel.querySelector('[data-qd="cap-modal"]');
     var modalText = panel.querySelector('[data-qd="md-text"]');
 
     var pollTimer = null;
@@ -660,6 +661,77 @@
         stopPolling();
     }
 
+    // ---- capture trace -----------------------------------------------------
+
+    /**
+     * Buka modal "Ambil Kasus". Dropdown langkah-dicurigai diisi dari batch
+     * yang SEDANG tampil, dan default-nya langkah paling akhir — karena
+     * support menekan tombol ini tepat setelah melihat hasil yang salah,
+     * jadi langkah terakhir hampir selalu yang bermasalah.
+     */
+    function openCapture() {
+        if (!capModal) return;
+        var sel = capModal.querySelector('[data-qd="cap-suspect"]');
+        var res = capModal.querySelector('[data-qd="cap-result"]');
+        if (res) res.innerHTML = '';
+
+        // lastBatches = TERBARU DULU; trace disimpan kronologis, jadi nomor
+        // langkah dibalik supaya cocok dengan yang nanti dilihat dev.
+        var total = lastBatches.length;
+        if (sel) {
+            var html = '';
+            lastBatches.forEach(function (b, i) {
+                var no = total - i;
+                html += '<option value="' + no + '"' + (i === 0 ? ' selected' : '') + '>'
+                     + no + '. ' + esc((b.method || '') + ' /' + (b.path || '')) + '</option>';
+            });
+            sel.innerHTML = html || '<option value="-1">(belum ada langkah)</option>';
+        }
+        capModal.removeAttribute('hidden');
+    }
+
+    function closeCapture() { if (capModal) capModal.setAttribute('hidden', ''); }
+
+    function submitCapture() {
+        var noteEl = capModal.querySelector('[data-qd="cap-note"]');
+        var selEl = capModal.querySelector('[data-qd="cap-suspect"]');
+        var res = capModal.querySelector('[data-qd="cap-result"]');
+        var note = noteEl ? noteEl.value.trim() : '';
+
+        if (!note) {
+            if (res) res.innerHTML = '<div class="qd-err">Isi dulu catatan singkatnya — ini yang dibaca developer duluan.</div>';
+            if (noteEl) noteEl.focus();
+            return;
+        }
+        if (res) res.innerHTML = '<div class="qd-empty">Menyimpan...</div>';
+
+        fetch(CFG.captureUrl, {
+            method: 'POST',
+            headers: authHeaders({ 'X-CSRF-TOKEN': getCsrf(), 'Content-Type': 'application/json' }),
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                note: note,
+                suspect: selEl ? parseInt(selEl.value, 10) : -1
+            })
+        }).then(function (r) {
+            return r.json().then(function (j) { return { ok: r.ok, json: j }; });
+        }).then(function (out) {
+            if (!out.ok) {
+                res.innerHTML = '<div class="qd-err">' + esc(out.json.message || 'Gagal menyimpan trace.') + '</div>';
+                return;
+            }
+            var d = out.json.data || {};
+            res.innerHTML =
+                '<div style="background:#243024;border-radius:4px;padding:8px 10px">'
+                + '<div style="color:#9b9b93;margin-bottom:4px">Kirim kode ini ke developer:</div>'
+                + '<div style="font-size:15px;font-weight:600;letter-spacing:.02em">' + esc(d.code || '') + '</div>'
+                + '<button data-qd="cap-copy" data-code="' + esc(d.code || '') + '" style="margin-top:6px">Copy kode</button>'
+                + '</div>';
+        }).catch(function () {
+            res.innerHTML = '<div class="qd-err">Gagal menghubungi server.</div>';
+        });
+    }
+
     // ---- events ------------------------------------------------------------
 
     fab.addEventListener('click', function () { isOpen() ? close() : open(); });
@@ -672,6 +744,10 @@
         if (action === 'refresh') return fetchRecent();
         if (action === 'clear') return clearAll();
         if (action === 'lock') return lockSession();
+        if (action === 'capture') return openCapture();
+        if (action === 'cap-close') return closeCapture();
+        if (action === 'cap-submit') return submitCapture();
+        if (action === 'cap-copy') { copyText(t.getAttribute('data-code') || '', t); return; }
 
         // ---- modal export ----
         if (action === 'md-close') return closeModal();

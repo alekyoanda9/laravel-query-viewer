@@ -7,6 +7,7 @@ use Illuminate\Support\ServiceProvider;
 use Sd1\QueryViewer\Http\Middleware\InjectQueryViewer;
 use Sd1\QueryViewer\Http\Middleware\LogQueryDebug;
 use Sd1\QueryViewer\Http\Middleware\VerifyQueryDebugKey;
+use Sd1\QueryViewer\Http\Middleware\VerifyTraceAccess;
 
 class QueryViewerServiceProvider extends ServiceProvider
 {
@@ -22,6 +23,10 @@ class QueryViewerServiceProvider extends ServiceProvider
 
         // Gate untuk endpoint package.
         $router->aliasMiddleware('querydebug.gate', VerifyQueryDebugKey::class);
+
+        // Gate terpisah untuk halaman trace viewer (dibuka lewat navigasi
+        // browser, jadi tidak bisa membawa header X-Query-Debug-Key).
+        $router->aliasMiddleware('querydebug.trace', VerifyTraceAccess::class);
 
         // Dengarkan query di seluruh request web (middleware sendiri yang cek
         // apakah sesi sudah unlock — kalau belum, ia transparan).

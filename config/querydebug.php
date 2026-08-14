@@ -54,6 +54,46 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Trace (perekam langkah support)
+    |--------------------------------------------------------------------------
+    |
+    | Ring buffer query yang sudah ada dipakai ulang sebagai buffer langkah;
+    | "trace" adalah hasil promote buffer itu jadi file permanen berkode,
+    | dipicu support lewat tombol "Ambil Kasus" di panel.
+    |
+    */
+
+    'trace' => [
+
+        'enabled' => env('QUERY_DEBUG_TRACE', true),
+
+        // Disimpan sebagai file JSON, BUKAN tabel DB — koneksi DB app ini ikut
+        // cabang terpilih, jadi trace di tabel tidak akan bisa dibuka dev yang
+        // sedang login di cabang berbeda.
+        'disk' => env('QUERY_DEBUG_TRACE_DISK', 'local'),
+        'path' => 'querydebug/traces',
+
+        // Batas atas langkah per trace (buffer sendiri dibatasi max_batches).
+        'max_steps' => 40,
+
+        // Input request ikut direkam — inilah yang membuat step bisa
+        // direproduksi (filter apa, kode toko mana). Matikan kalau lingkungan
+        // tidak mengizinkan payload tersimpan sama sekali.
+        'capture_input' => true,
+
+        // Key input yang nilainya diganti '[redacted]'. Cocok secara substring
+        // dan case-insensitive.
+        'redact_keys' => [
+            'password', 'passwd', 'pwd', 'token', 'secret', 'api_key', 'apikey',
+            'authorization', 'credit', 'cvv', 'pin',
+        ],
+
+        'max_input_keys'    => 40,
+        'max_value_length'  => 300,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Export tiket
     |--------------------------------------------------------------------------
     */

@@ -121,6 +121,67 @@ response HTML — **tim tidak perlu menyentuh layout**. Matikan dengan
 
 ---
 
+## 5b. Trace — perekam langkah support
+
+Modul ini menjawab masalah: support menemukan bug, lalu harus **mengetik ulang
+dari ingatan** urutan langkahnya ke developer ("tadi saya pilih cabang 44, terus
+ke Master > OMI, terus..."). Sering ada yang kelewat, dan dev gagal reproduce.
+
+### Cara kerja
+
+Perekaman **sudah jalan terus** sejak sesi di-unlock (pola *flight recorder*) —
+tidak ada tombol "mulai rekam" yang harus diingat, karena support tidak pernah
+tahu bug akan muncul sebelum bug itu muncul.
+
+Yang dipakai sebagai buffer langkah adalah ring buffer yang memang sudah ada:
+`LogQueryDebug` mem-push satu batch per HTTP request, lengkap dengan
+`method`, `path`, `route`, `conn`, `context`, `error`, dan `queries` — itu
+persis satu langkah. Modul trace menambahkan `input`, `status`, dan `dur_ms`,
+lalu menyediakan mekanisme mempromosikannya jadi file permanen.
+
+### Alur
+
+1. Support bekerja normal (unlock panel seperti biasa).
+2. Menemukan hasil yang salah → buka panel → **Ambil Kasus**.
+3. Isi catatan singkat + pilih langkah yang dicurigai (default: langkah terakhir).
+4. Dapat kode `TRC-YYYYMMDD-XXXX` → kirim ke developer.
+5. Developer buka `/{prefix}/trace/{kode}` → timeline lengkap.
+
+### Yang dilihat developer
+
+Header trace menonjolkan **koneksi/cabang** — penyebab nomor satu "kok di saya
+tidak bisa reproduce". Lalu tiap langkah menampilkan waktu, method + path,
+input request (sudah ter-redact), status & durasi, error kalau ada, dan
+SQL mentah siap copy ke DBeaver. Langkah yang ditandai support diberi border
+merah dan query-nya otomatis terbuka.
+
+Tersedia juga `/{prefix}/trace/{kode}/json` untuk dilampirkan ke tiket PRPK/memo,
+dan `/{prefix}/trace` untuk daftar trace terbaru.
+
+### Akses halaman viewer
+
+Halaman trace dibuka lewat **navigasi browser biasa**, yang tidak bisa mengirim
+header `X-Query-Debug-Key`. Karena itu halaman ini memakai gate terpisah
+(`querydebug.trace`): buka **sekali** dengan `?key=<API key>`, middleware
+menandai session lalu redirect ke URL bersih. Efeknya kode trace aman dibagikan
+lewat chat tanpa ikut membawa API key.
+
+### Penyimpanan
+
+Trace disimpan sebagai file JSON di `storage/app/querydebug/traces/YYYY-MM/`,
+**bukan tabel DB**. Alasannya: koneksi DB aplikasi ini ikut cabang terpilih,
+jadi trace yang disimpan di tabel tidak akan bisa dibuka developer yang sedang
+login di cabang berbeda — persis masalah yang mau dihilangkan. Bonus: tanpa
+migration, tidak menyentuh skema DB sama sekali.
+
+### Batasan (penting, jangan dijanjikan lebih)
+
+Trace ini **panduan reproduksi**, bukan mesin waktu. State data saat capture
+sudah berbeda dengan saat dev membuka trace. Tidak ada replay otomatis, dan
+memang sengaja: me-replay request tulis (POST/PUT) ke database nyata jauh lebih
+berbahaya daripada manfaatnya. Yang didapat dev adalah peta presisi — cabang,
+urutan, input, SQL, hasil — bukan pengembalian kondisi.
+
 ## 6. Distribusi (pilih salah satu)
 
 **a. VCS repo privat (paling umum).** Push package ke GitLab/GitHub internal,
