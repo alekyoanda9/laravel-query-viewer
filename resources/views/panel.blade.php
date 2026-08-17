@@ -560,7 +560,7 @@
 
         .qd-cap-hint {
             font-size: 11px;
-            color: #9b9b93;
+            color: #94a3b8;
             line-height: 1.5;
             margin-bottom: 8px;
         }
@@ -570,12 +570,12 @@
             font-size: 11px;
             font-weight: 600;
             margin: 10px 0 3px;
-            color: #d9d9d2;
+            color: #e2e8f0;
         }
 
         .qd-cap-opt {
             font-weight: 400;
-            color: #8a8a82;
+            color: #64748b;
         }
 
         .qd-cap-input {
@@ -583,9 +583,9 @@
             padding: 6px 8px;
             box-sizing: border-box;
             font-size: 12px;
-            background: #2a2a26;
-            color: #eceae2;
-            border: 1px solid #46463f;
+            background: #1e293b;
+            color: #e2e8f0;
+            border: 1px solid #334155;
             border-radius: 4px;
             font-family: inherit;
         }
@@ -599,14 +599,14 @@
         }
 
         .qd-cap-group {
-            border: 1px solid #3a3a34;
+            border: 1px solid #334155;
             border-radius: 5px;
             margin-bottom: 8px;
             overflow: hidden;
         }
 
         .qd-cap-group.failed {
-            border-color: #a44;
+            border-color: #7f1d1d;
         }
 
         .qd-cap-ghead {
@@ -614,7 +614,7 @@
             align-items: center;
             gap: 6px;
             padding: 6px 8px;
-            background: #2d2d28;
+            background: #172033;
         }
 
         .qd-cap-glabel {
@@ -622,15 +622,15 @@
             padding: 3px 6px;
             font-size: 11.5px;
             font-weight: 600;
-            background: #23231f;
-            color: #eceae2;
-            border: 1px solid #44443d;
+            background: #0f172a;
+            color: #e2e8f0;
+            border: 1px solid #334155;
             border-radius: 3px;
         }
 
         .qd-cap-fail {
             font-size: 10.5px;
-            color: #d98a8a;
+            color: #fca5a5;
             white-space: nowrap;
             display: flex;
             align-items: center;
@@ -643,7 +643,7 @@
             align-items: center;
             gap: 6px;
             padding: 4px 8px;
-            border-top: 1px solid #333;
+            border-top: 1px solid #1e293b;
         }
 
         .qd-cap-step.off {
@@ -651,7 +651,7 @@
         }
 
         .qd-cap-step.fp {
-            background: #3a2020;
+            background: rgba(127, 29, 29, .18);
         }
 
         .qd-cap-inc {
@@ -664,22 +664,22 @@
             font-weight: 600;
             padding: 1px 4px;
             border-radius: 3px;
-            background: #3a3a33;
-            color: #cfcfc6;
+            background: #334155;
+            color: #cbd5e1;
         }
 
         .qd-cap-m.POST,
         .qd-cap-m.PUT,
         .qd-cap-m.DELETE {
-            background: #4a2a2a;
-            color: #f0b6b6;
+            background: #7f1d1d;
+            color: #fecaca;
         }
 
         .qd-cap-p {
             flex: 1;
             font-family: ui-monospace, monospace;
             font-size: 11px;
-            color: #cfcfc6;
+            color: #cbd5e1;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -692,15 +692,15 @@
         }
 
         .qd-cap-b.bad {
-            background: #4a2a2a;
-            color: #f0b6b6;
+            background: #7f1d1d;
+            color: #fecaca;
         }
 
         .qd-cap-fp {
             font-size: 10px;
             background: transparent;
-            border: 1px solid #55554e;
-            color: #b9b9b0;
+            border: 1px solid #334155;
+            color: #94a3b8;
             border-radius: 3px;
             padding: 1px 6px;
             cursor: pointer;
@@ -708,27 +708,13 @@
         }
 
         .qd-cap-step.fp .qd-cap-fp {
-            border-color: #d14343;
-            color: #f0b6b6;
-        }
-
-        .qd-cap-split {
-            text-align: center;
-            font-size: 9.5px;
-            color: #7a7a72;
-            padding: 2px;
-            cursor: pointer;
-            border-top: 1px dashed #3a3a34;
-        }
-
-        .qd-cap-split:hover {
-            color: #cfcfc6;
-            background: #2a2a26;
+            border-color: #ef4444;
+            color: #fecaca;
         }
 
         .qd-cap-foot {
             padding: 8px 12px;
-            border-top: 1px solid #333;
+            border-top: 1px solid #334155;
         }
 
         .qd-cap-submit {
@@ -737,9 +723,9 @@
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
-            background: #3a5a3a;
-            color: #eafeea;
-            border: 1px solid #4a704a;
+            background: #16a34a;
+            color: #fff;
+            border: 1px solid #16a34a;
             border-radius: 4px;
         }
 
@@ -748,14 +734,14 @@
         }
 
         .qd-cap-ok {
-            background: #243024;
+            background: #14532d;
             border-radius: 5px;
             padding: 10px;
         }
 
         .qd-cap-oklbl {
             font-size: 10.5px;
-            color: #9b9b93;
+            color: #94a3b8;
             margin-bottom: 3px;
         }
 
@@ -763,12 +749,12 @@
             font-size: 15px;
             font-weight: 600;
             letter-spacing: .02em;
-            color: #eafeea;
+            color: #bbf7d0;
         }
 
         .qd-cap-url {
             font-size: 10px;
-            color: #8fbf8f;
+            color: #86efac;
             word-break: break-all;
             margin: 4px 0 6px;
         }
@@ -783,9 +769,9 @@
             padding: 5px;
             font-size: 11px;
             cursor: pointer;
-            background: #2f3f2f;
-            color: #eafeea;
-            border: 1px solid #4a704a;
+            background: #166534;
+            color: #dcfce7;
+            border: 1px solid #16a34a;
             border-radius: 4px;
         }
     </style>

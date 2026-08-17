@@ -174,4 +174,44 @@ class TraceController extends Controller
     {
         return view('querydebug::traces', ['traces' => $this->service->recent(50)]);
     }
+
+    /**
+     * Hapus satu trace. Dipanggil dari tombol Hapus di halaman daftar maupun
+     * halaman detail — keduanya form POST biasa (bukan fetch), jadi cukup
+     * redirect back dengan flash message.
+     */
+    public function delete(Request $request, $code)
+    {
+        try {
+            $this->service->delete((string) $code);
+
+            return redirect($request->input('back') ?: $this->indexUrl())
+                ->with('querydebug_status', 'Trace ' . $code . ' dihapus.');
+        } catch (QueryDebugException $e) {
+            return redirect($request->input('back') ?: $this->indexUrl())
+                ->with('querydebug_error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Bersihkan trace lebih lama dari N hari, dari form di halaman daftar.
+     */
+    public function prune(Request $request)
+    {
+        try {
+            $days = (int) $request->input('days');
+            $count = $this->service->prune($days);
+
+            return redirect($this->indexUrl())
+                ->with('querydebug_status', $count . ' trace lebih lama dari ' . $days . ' hari dihapus.');
+        } catch (QueryDebugException $e) {
+            return redirect($this->indexUrl())
+                ->with('querydebug_error', $e->getMessage());
+        }
+    }
+
+    private function indexUrl(): string
+    {
+        return url(config('querydebug.route_prefix', 'dev/query-debug') . '/trace');
+    }
 }

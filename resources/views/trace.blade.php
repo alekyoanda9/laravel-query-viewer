@@ -248,6 +248,8 @@
             padding: 10px 12px;
             border-radius: 4px;
             overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
             font-size: 12px;
             line-height: 1.5;
             margin: 6px 0 0;
@@ -281,6 +283,42 @@
             color: #78786f;
             padding: 8px;
         }
+
+        .head-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        button.btn {
+            font: inherit;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .btn.danger {
+            color: #a12b2b;
+            border-color: #f3c2c2;
+            background: #fde8e8;
+        }
+
+        .flash {
+            padding: 9px 12px;
+            border-radius: 6px;
+            margin-bottom: 14px;
+            font-size: 13px;
+        }
+
+        .flash.ok {
+            background: #e9f6ec;
+            color: #1e6b34;
+            border: 1px solid #b9e3c3;
+        }
+
+        .flash.err {
+            background: #fde8e8;
+            color: #a12b2b;
+            border: 1px solid #f3c2c2;
+        }
     </style>
 </head>
 
@@ -310,8 +348,23 @@
                     @if (!empty($trace['prpk'])) &middot; {{ $trace['prpk'] }} @endif
                 </div>
             </div>
-            <a class="btn" href="{{ url($prefix . '/trace/' . $trace['code'] . '/json') }}">JSON</a>
+            <div class="head-actions">
+                <a class="btn" href="{{ url($prefix . '/trace/' . $trace['code'] . '/json') }}">JSON</a>
+                <form method="POST" action="{{ url($prefix . '/trace/' . $trace['code'] . '/delete') }}"
+                      onsubmit="return confirm('Hapus trace {{ $trace['code'] }}? Tindakan ini tidak bisa dibatalkan.');">
+                    @csrf
+                    <input type="hidden" name="back" value="{{ url($prefix . '/trace') }}">
+                    <button type="submit" class="btn danger">Hapus</button>
+                </form>
+            </div>
         </div>
+
+        @if (session('querydebug_status'))
+            <div class="flash ok">{{ session('querydebug_status') }}</div>
+        @endif
+        @if (session('querydebug_error'))
+            <div class="flash err">{{ session('querydebug_error') }}</div>
+        @endif
 
         <span class="cat {{ $catClass }}">{{ $trace['category_label'] ?? $catClass }}</span>
 

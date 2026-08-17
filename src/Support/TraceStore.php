@@ -123,6 +123,67 @@ class TraceStore
     }
 
     /**
+     * Hapus satu trace: file JSON-nya + folder lampirannya (kalau ada).
+     * Dipanggil dari tombol Hapus per-baris maupun dari pruneOlderThan().
+     */
+    public static function delete(string $code): bool
+    {
+        if (! self::isValidCode($code)) {
+            return false;
+        }
+
+        $disk = self::disk();
+        $path = self::pathFor($code);
+
+        if (! $disk->exists($path)) {
+            return false;
+        }
+
+        $disk->delete($path);
+
+        $dir = self::attachmentDir($code);
+        if ($disk->exists($dir)) {
+            $disk->deleteDirectory($dir);
+        }
+
+        return true;
+    }
+
+    /**
+     * Hapus semua trace yang tanggalnya (diturunkan dari kode, bukan mtime
+     * file — konsisten dengan pathFor()/recent()) lebih tua dari $days hari.
+     * Dipakai form "bersihkan lebih lama dari N hari" dan Artisan command
+     * querydebug:prune-traces.
+     *
+     * @return int  jumlah trace yang terhapus
+     */
+    public static function pruneOlderThan(int $days): int
+    {
+        $disk   = self::disk();
+        $root   = self::root();
+        $cutoff = now()->subDays($days)->format('Ymd');
+
+        $count = 0;
+        foreach ($disk->allFiles($root) as $file) {
+            if (substr($file, -5) !== '.json') {
+                continue;
+            }
+
+            $code = basename($file, '.json');
+            if (! self::isValidCode($code)) {
+                continue;
+            }
+
+            $datePart = substr($code, 4, 8); // YYYYMMDD
+            if ($datePart < $cutoff && self::delete($code)) {
+                $count++;
+            }
+        }
+
+        return $count;
+    }
+
+    /**
      * Validasi bentuk kode SEBELUM dipakai menyusun path.
      * Ini yang menahan path traversal (mis. ../../.env) dari input URL.
      */
@@ -143,11 +204,14 @@ class TraceStore
         $root  = self::root();
         $files = [];
 
-        foreach ($disk->directories($root) as $monthDir) {
-            foreach ($disk->files($monthDir) as $file) {
-                if (substr($file, -5) === '.json') {
-                    $files[] = $file;
-                }
+        // allFiles() dipakai (bukan directories()+files() 2 level) karena scan
+        // rekursif jauh lebih tahan terhadap variasi struktur folder — mis.
+        // file JSON yang ternyata bukan langsung di {root}/{YYYY-MM}/, atau
+        // ada sub-folder tak terduga di antaranya. directories()+files() diam-
+        // diam melewatkan trace di luar 2 level itu tanpa error apa pun.
+        foreach ($disk->allFiles($root) as $file) {
+            if (substr($file, -5) === '.json') {
+                $files[] = $file;
             }
         }
 

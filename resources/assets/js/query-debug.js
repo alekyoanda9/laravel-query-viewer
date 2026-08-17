@@ -767,11 +767,6 @@
 
             groupSteps.forEach(function (st, k) {
                 var b = st.batch;
-                var isFirstInGroup = (k === 0);
-                // tombol "pisah di sini" muncul mulai langkah ke-2 dalam grup
-                if (!isFirstInGroup) {
-                    html += '<div class="qd-cap-split" data-qd="cap-split" data-idx="' + st.idx + '">— pisah grup di sini —</div>';
-                }
                 var badge = b.error ? '<span class="qd-cap-b bad">ERR</span>'
                     : (b.status && b.status >= 400 ? '<span class="qd-cap-b bad">' + b.status + '</span>' : '');
                 html += '<div class="qd-cap-step' + (st.included ? '' : ' off') + (st.failPoint ? ' fp' : '') + '">' +
@@ -791,24 +786,6 @@
 
     function capStepByIdx(idx) {
         return capState.steps.filter(function (s) { return s.idx === idx; })[0];
-    }
-
-    // "pisah grup di sini": langkah ini + semua langkah SESUDAHNYA yang masih
-    // satu grup dipindah ke grup baru. Tidak menyentuh langkah di grup lain.
-    function splitAt(idx) {
-        var pivot = capStepByIdx(idx);
-        if (!pivot) return;
-        var oldGid = pivot.group;
-        var newGid = 'g' + (capState.groups.length) + '_' + Date.now();
-        var base = capState.groups.filter(function (g) { return g.id === oldGid; })[0];
-        capState.groups.push({ id: newGid, label: (base ? base.label : '') + ' (lanjutan)', origin: base ? base.origin : '' });
-        var moving = false;
-        capState.steps.forEach(function (s) {
-            if (s.idx === idx) moving = true;
-            if (moving && s.group === oldGid) s.group = newGid;
-        });
-        if (capState.failedGroup === oldGid) capState.failedGroup = null;
-        renderCapSteps();
     }
 
     function collectPayload() {
@@ -952,7 +929,6 @@
         if (action === 'cap-submit') return submitCapture();
         if (action === 'cap-copy') { copyText(t.getAttribute('data-code') || '', t); return; }
         if (action === 'cap-copy-url') { copyText(t.getAttribute('data-url') || '', t); return; }
-        if (action === 'cap-split') { splitAt(parseInt(t.getAttribute('data-idx'), 10)); return; }
         if (action === 'cap-fp') {
             var fpi = parseInt(t.getAttribute('data-idx'), 10);
             capState.steps.forEach(function (s) { s.failPoint = (s.idx === fpi) ? !s.failPoint : false; });
@@ -1104,4 +1080,4 @@
     }
 
     try { if (sessionStorage.getItem(OPEN_STORAGE) === '1') open(); } catch (e) { }
-})();   
+})();

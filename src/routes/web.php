@@ -43,7 +43,9 @@ Route::group([
     'middleware' => ['web', 'querydebug.trace'],
 ], function () {
     Route::get('/', [TraceController::class, 'index']);
+    Route::post('/prune', [TraceController::class, 'prune']);
     Route::get('/{code}', [TraceController::class, 'show']);
     Route::get('/{code}/json', [TraceController::class, 'json']);
     Route::get('/{code}/file/{idx}', [TraceController::class, 'attachment']);
+    Route::post('/{code}/delete', [TraceController::class, 'delete']);
 });

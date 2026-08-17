@@ -49,7 +49,14 @@ return [
     'ttl_minutes' => env('QUERY_DEBUG_TTL_MINUTES', 30),
 
     'download_patterns' => [
-        'cetak', 'export', 'download', 'unduh', 'pdf', 'excel', 'xls', 'print',
+        'cetak',
+        'export',
+        'download',
+        'unduh',
+        'pdf',
+        'excel',
+        'xls',
+        'print',
     ],
 
     /*
@@ -84,8 +91,17 @@ return [
         // Key input yang nilainya diganti '[redacted]'. Cocok secara substring
         // dan case-insensitive.
         'redact_keys' => [
-            'password', 'passwd', 'pwd', 'token', 'secret', 'api_key', 'apikey',
-            'authorization', 'credit', 'cvv', 'pin',
+            'password',
+            'passwd',
+            'pwd',
+            'token',
+            'secret',
+            'api_key',
+            'apikey',
+            'authorization',
+            'credit',
+            'cvv',
+            'pin',
         ],
 
         'max_input_keys'    => 40,
@@ -111,9 +127,19 @@ return [
         'max_attachments'     => 6,
         'max_upload_kb'       => env('QUERY_DEBUG_TRACE_MAX_UPLOAD_KB', 5120), // 5 MB/file
         'allowed_upload_mime' => [
-            'image/png', 'image/jpeg', 'image/gif', 'image/webp',
-            'video/mp4', 'video/webm',
+            'image/png',
+            'image/jpeg',
+            'image/gif',
+            'image/webp',
+            'video/mp4',
+            'video/webm',
         ],
+
+        // Dipakai default oleh Artisan command querydebug:prune-traces kalau
+        // dijalankan tanpa --days=. Jadwalkan sendiri di App\Console\Kernel
+        // (mis. mingguan), karena package ini tidak mendaftarkan schedule apa
+        // pun secara otomatis.
+        'retention_days' => env('QUERY_DEBUG_TRACE_RETENTION_DAYS', 90),
     ],
 
     /*

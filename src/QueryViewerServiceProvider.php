@@ -4,6 +4,7 @@ namespace Sd1\QueryViewer;
 
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
+use Sd1\QueryViewer\Console\Commands\PruneTraces;
 use Sd1\QueryViewer\Http\Middleware\InjectQueryViewer;
 use Sd1\QueryViewer\Http\Middleware\LogQueryDebug;
 use Sd1\QueryViewer\Http\Middleware\VerifyQueryDebugKey;
@@ -38,6 +39,10 @@ class QueryViewerServiceProvider extends ServiceProvider
         }
 
         if ($this->app->runningInConsole()) {
+            $this->commands([
+                PruneTraces::class,
+            ]);
+
             $this->publishes([
                 __DIR__ . '/../config/querydebug.php' => config_path('querydebug.php'),
             ], 'query-viewer-config');

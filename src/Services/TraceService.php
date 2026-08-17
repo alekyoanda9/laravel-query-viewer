@@ -136,6 +136,22 @@ class TraceService
         return TraceStore::recent($limit);
     }
 
+    public function delete(string $code): void
+    {
+        if (! TraceStore::delete($code)) {
+            throw new QueryDebugException('Trace ' . $code . ' tidak ditemukan.', 404);
+        }
+    }
+
+    public function prune(int $days): int
+    {
+        if ($days < 1) {
+            throw new QueryDebugException('Jumlah hari tidak valid.', 422);
+        }
+
+        return TraceStore::pruneOlderThan($days);
+    }
+
     private function cleanPrpk($value): string
     {
         $value = trim((string) $value);
