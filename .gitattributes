@@ -1,0 +1,14 @@
+# Normalisasi line ending
+* text=auto eol=lf
+
+# --- Dev-only, JANGAN ikut ke dist zip consumer (git archive / composer install) ---
+/sample           export-ignore
+/tests            export-ignore
+/.github          export-ignore
+/.gitattributes   export-ignore
+/.gitignore       export-ignore
+/phpunit.xml      export-ignore
+/phpunit.xml.dist export-ignore
+/.editorconfig    export-ignore
+/.styleci.yml     export-ignore
+/CHANGELOG.md     export-ignore
