@@ -43,6 +43,59 @@ class TraceStore
     }
 
     /**
+     * List semua file (bukan direktori) di bawah $root secara rekursif,
+     * sudah dinormalisasi ke forward-slash.
+     *
+     * PENTING — kenapa ini tidak pakai $disk->allFiles($root)/directories():
+     * di Windows, League\Flysystem v1 Adapter\Local yang dipakai Laravel 5.8
+     * punya bug listing rekursif — path level teratas dinormalisasi ke '/'
+     * tapi path level di bawahnya diambil dari RecursiveDirectoryIterator
+     * native PHP yang di Windows menghasilkan '\' (mis.
+     * "querydebug/traces\2026-08\TRC-xxx.json"). Lapisan filter
+     * League\Flysystem\Filesystem yang membungkus adapter itu mencocokkan
+     * prefix path dengan asumsi separator '/' konsisten; begitu ketemu '\'
+     * di tengah path, filter itu gagal cocok dan MEMBUANG SEMUA hasil tanpa
+     * exception — jadi Storage::allFiles()/directories() selalu balikin
+     * array kosong walau file fisiknya ada. Manggil adapter mentah
+     * (listContents) melewati filter yang bermasalah itu; kita normalisasi
+     * separator sendiri di sini.
+     *
+     * Kalau adapter Flysystem tidak tersedia (mis. driver disk bukan lokal,
+     * atau versi Flysystem berbeda di masa depan setelah upgrade), fallback
+     * ke allFiles() bawaan Laravel supaya tetap jalan (walau berpotensi kena
+     * bug yang sama di Windows sampai library-nya di-upgrade).
+     *
+     * @return array<int,string>
+     */
+    private static function listAllFiles($disk, string $root): array
+    {
+        try {
+            $driver  = $disk->getDriver();
+            $adapter = method_exists($driver, 'getAdapter') ? $driver->getAdapter() : null;
+
+            if ($adapter === null || ! method_exists($adapter, 'listContents')) {
+                throw new \RuntimeException('adapter tidak mendukung listContents');
+            }
+
+            $entries = $adapter->listContents($root, true);
+
+            $files = [];
+            foreach ($entries as $entry) {
+                if (($entry['type'] ?? null) !== 'file') {
+                    continue;
+                }
+
+                $files[] = str_replace('\\', '/', $entry['path']);
+            }
+
+            return $files;
+        } catch (\Throwable $e) {
+            // Fallback aman: tetap coba cara Laravel biasa daripada mati total.
+            return $disk->allFiles($root);
+        }
+    }
+
+    /**
      * Kode trace unik, format TRC-YYYYMMDD-XXXX.
      *
      * Bagian acak (bukan counter berurut) dipakai supaya tidak ada race saat
@@ -164,7 +217,7 @@ class TraceStore
         $cutoff = now()->subDays($days)->format('Ymd');
 
         $count = 0;
-        foreach ($disk->allFiles($root) as $file) {
+        foreach (self::listAllFiles($disk, $root) as $file) {
             if (substr($file, -5) !== '.json') {
                 continue;
             }
@@ -204,12 +257,14 @@ class TraceStore
         $root  = self::root();
         $files = [];
 
-        // allFiles() dipakai (bukan directories()+files() 2 level) karena scan
-        // rekursif jauh lebih tahan terhadap variasi struktur folder — mis.
-        // file JSON yang ternyata bukan langsung di {root}/{YYYY-MM}/, atau
-        // ada sub-folder tak terduga di antaranya. directories()+files() diam-
-        // diam melewatkan trace di luar 2 level itu tanpa error apa pun.
-        foreach ($disk->allFiles($root) as $file) {
+        // listAllFiles() dipakai (bukan Storage::allFiles()/directories() 2
+        // level) karena scan rekursif jauh lebih tahan terhadap variasi
+        // struktur folder — mis. file JSON yang ternyata bukan langsung di
+        // {root}/{YYYY-MM}/, atau ada sub-folder tak terduga di antaranya.
+        // directories()+files() diam-diam melewatkan trace di luar 2 level
+        // itu tanpa error apa pun. Lihat komentar di listAllFiles() untuk
+        // alasan kenapa ini tidak langsung memanggil Storage::allFiles().
+        foreach (self::listAllFiles($disk, $root) as $file) {
             if (substr($file, -5) === '.json') {
                 $files[] = $file;
             }
@@ -229,7 +284,7 @@ class TraceStore
 
             $out[] = [
                 'code'       => isset($decoded['code']) ? $decoded['code'] : null,
-                'note'       => isset($decoded['note']) ? $decoded['note'] : '',
+                'note'       => isset($decoded['description']) ? $decoded['description'] : '',
                 'user'       => isset($decoded['user']) ? $decoded['user'] : null,
                 'captured_at' => isset($decoded['captured_at']) ? $decoded['captured_at'] : null,
                 'steps'      => isset($decoded['steps']) ? count($decoded['steps']) : 0,
