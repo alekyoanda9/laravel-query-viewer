@@ -271,6 +271,16 @@
             color: #ffd9d9;
         }
 
+        pre.resp {
+            background: #16261c;
+            color: #d6efdf;
+            max-height: 340px;
+        }
+
+        details.respbox>summary {
+            color: #4b7a5a;
+        }
+
         details>summary {
             cursor: pointer;
             margin-top: 8px;
@@ -459,6 +469,28 @@
                                             @if (!empty($q['failed'])) &middot; GAGAL: {{ $q['error'] }} @endif
                                         </div>
                                     @endforeach
+                                </details>
+                            @endif
+
+                            @if (!empty($step['response']))
+                                @php $resp = $step['response']; @endphp
+                                <details class="respbox">
+                                    <summary>Response
+                                        @if (!empty($resp['content_type'])) &middot; {{ $resp['content_type'] }} @endif
+                                        @if (isset($resp['status'])) &middot; {{ $resp['status'] }} @endif
+                                    </summary>
+                                    @if (($resp['kind'] ?? '') === 'body' && isset($resp['body']) && $resp['body'] !== null)
+                                        @if (!empty($resp['truncated']))
+                                            <div class="dim">dipotong (asli: {{ isset($resp['size']) ? round($resp['size']/1024, 1) . ' KB' : '?' }})</div>
+                                        @endif
+                                        <pre class="resp">{{ $resp['body'] }}</pre>
+                                    @else
+                                        <div class="dim">
+                                            {{ ($resp['kind'] ?? '') === 'binary' ? 'download/stream — body tidak ditangkap' : 'tipe tidak ditangkap' }}
+                                            @if (!empty($resp['filename'])) &middot; {{ $resp['filename'] }} @endif
+                                            @if (isset($resp['size'])) &middot; {{ round($resp['size']/1024, 1) }} KB @endif
+                                        </div>
+                                    @endif
                                 </details>
                             @endif
                         </div>

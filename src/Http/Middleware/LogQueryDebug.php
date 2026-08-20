@@ -11,8 +11,6 @@ use Sd1\QueryViewer\Support\QueryDebugSql;
 use Sd1\QueryViewer\Support\QueryDebugStore;
 use Sd1\QueryViewer\Support\StepRedactor;
 
-use Illuminate\Support\Facades\Log;
-
 class LogQueryDebug
 {
     public function handle($request, Closure $next)
@@ -51,12 +49,22 @@ class LogQueryDebug
         });
 
         $requestError = null;
+        $responseData = null;
 
         try {
             $response = $next($request);
 
             if (method_exists($response, 'getStatusCode')) {
                 $status = $response->getStatusCode();
+            }
+
+            // Tangkap response (json/text saja, dibatasi ukuran, binary=metadata)
+            // untuk tab Response di dashboard & halaman trace. Dibungkus try
+            // supaya kegagalan capture TIDAK pernah mengganggu response asli.
+            try {
+                $responseData = \Sd1\QueryViewer\Support\ResponseCapturer::capture($response);
+            } catch (\Throwable $ignored) {
+                $responseData = null;
             }
 
             // PENTING: untuk error yang terjadi di dalam controller, $next()
@@ -96,7 +104,7 @@ class LogQueryDebug
         } finally {
             // finally SELALU jalan — request sukses, response ber-error, query
             // gagal, maupun exception yang benar-benar lolos.
-            $this->flush($request, $collector, $connection, $requestError, $status, $startedAt);
+            $this->flush($request, $collector, $connection, $requestError, $status, $startedAt, $responseData);
         }
     }
 
@@ -338,6 +346,7 @@ class LogQueryDebug
         return false;
     }
 
+
     private function relativePath(string $file): string
     {
         $file = str_replace('\\', '/', $file);
@@ -370,7 +379,7 @@ class LogQueryDebug
     /**
      * @param array|null $requestError ['class' => string, 'message' => string] kalau request ini error
      */
-    private function flush($request, QueryCollector $collector, $connection, $requestError, $status = null, $startedAt = null): void
+    private function flush($request, QueryCollector $collector, $connection, $requestError, $status = null, $startedAt = null, $responseData = null): void
     {
         // Tetap push walau query KOSONG asalkan request-nya error — supaya
         // "halaman ini 500 tanpa sempat menjalankan query apa pun" pun tetap
@@ -404,6 +413,9 @@ class LogQueryDebug
 
             // null kalau request sukses normal.
             'error'   => $requestError,
+
+            // Response yang ditangkap (json/text=body, binary=metadata) atau null.
+            'response' => $responseData,
 
             'queries' => $collector->all(),
         ]);

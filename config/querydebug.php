@@ -283,4 +283,39 @@ return [
         'max_value_length' => null,
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Penangkapan Response (Fitur 3/4)
+    |--------------------------------------------------------------------------
+    |
+    | Selain query & payload, tiap batch bisa menyimpan RESPONSE yang dibalas
+    | request — supaya tab "Response" di dashboard (/viewer) dan halaman trace
+    | bisa menampilkan "apa yang dikirim, apa yang dibalas" secara utuh.
+    |
+    | Rambu ketat (lihat §3.4):
+    |  - hanya application/json & text/* yang di-tangkap body-nya;
+    |  - download/cetak (BinaryFileResponse/StreamedResponse) -> METADATA saja,
+    |    body TIDAK dibaca (justru yang paling sering berat);
+    |  - dibatasi ukuran (max_kb), lebih dari itu dipotong + ditandai truncated;
+    |  - JSON dilewatkan redaksi yang SAMA dengan input sebelum disimpan;
+    |  - response TIDAK ikut di payload /recent (berat) — diambil lazy lewat
+    |    endpoint batch/{id}/response saat tab Response dibuka.
+    |
+    */
+
+    'response' => [
+
+        'enabled' => env('QUERY_DEBUG_RESPONSE', true),
+
+        // Batas ukuran body yang disimpan (KB). Lebih dari ini dipotong.
+        'max_kb' => env('QUERY_DEBUG_RESPONSE_MAX_KB', 64),
+
+        // Content-type yang boleh ditangkap body-nya. text/* & application/json.
+        // Selain ini (mis. octet-stream, pdf, excel) hanya metadata.
+        'capture_types' => [
+            'application/json',
+            'text/',
+        ],
+    ],
+
 ];

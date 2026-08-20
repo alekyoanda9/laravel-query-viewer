@@ -75,6 +75,50 @@ class QueryDebugController extends Controller
         }
     }
 
+    // --- Lazy detail (Fitur 1b) — dipakai dashboard /viewer -----------------
+
+    public function batch($id)
+    {
+        try {
+            return $this->ok($this->service->batch(Context::identity(), (string) $id));
+        } catch (QueryDebugException $e) {
+            return $this->fail($e->getMessage(), $e->getStatusCode());
+        }
+    }
+
+    public function batchPayload($id)
+    {
+        try {
+            return $this->ok($this->service->batchPayload(Context::identity(), (string) $id));
+        } catch (QueryDebugException $e) {
+            return $this->fail($e->getMessage(), $e->getStatusCode());
+        }
+    }
+
+    public function batchResponse($id)
+    {
+        try {
+            return $this->ok($this->service->batchResponse(Context::identity(), (string) $id));
+        } catch (QueryDebugException $e) {
+            return $this->fail($e->getMessage(), $e->getStatusCode());
+        }
+    }
+
+    // --- Halaman dashboard penuh (Fitur 3) ----------------------------------
+
+    public function viewer()
+    {
+        return view('querydebug::viewer', [
+            'prefix'          => trim((string) config('querydebug.route_prefix', 'dev/query-debug'), '/'),
+            'slow_ms'         => (int) config('querydebug.slow_ms', 500),
+            'poll_ms'         => (int) config('querydebug.poll.interval_ms', 2500),
+            'insight_enabled' => (bool) config('querydebug.insight.enabled', false),
+            'explain_enabled' => (bool) config('querydebug.insight.explain.enabled', false),
+            'sample_enabled'  => (bool) config('querydebug.sample.enabled', false),
+            'response_enabled' => (bool) config('querydebug.response.enabled', true),
+        ]);
+    }
+
     public function unlock()
     {
         Context::markActive();

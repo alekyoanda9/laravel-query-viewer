@@ -4,6 +4,7 @@ namespace Sd1\QueryViewer\Services;
 
 use Sd1\QueryViewer\Exceptions\QueryDebugException;
 use Sd1\QueryViewer\Support\Context;
+use Sd1\QueryViewer\Support\QueryDebugStore;
 use Sd1\QueryViewer\Support\TraceStore;
 
 /**
@@ -65,7 +66,7 @@ class TraceService
                 }
                 $no++;
             }
-            $steps[] = $this->normalizeStep($s, $included ? $no : null);
+            $steps[] = $this->normalizeStep($s, $included ? $no : null, $identity);
         }
 
         $groups = [];
@@ -162,7 +163,7 @@ class TraceService
         return substr((string) $value, 0, 60);
     }
 
-    private function normalizeStep(array $s, $no): array
+    private function normalizeStep(array $s, $no, string $identity): array
     {
         $queries = [];
         foreach ((isset($s['queries']) && is_array($s['queries']) ? $s['queries'] : []) as $q) {
@@ -176,6 +177,21 @@ class TraceService
                 'file'   => isset($q['file']) && $q['file'] !== '' ? (string) $q['file'] : null,
                 'line'   => isset($q['line']) && $q['line'] !== null ? (int) $q['line'] : null,
             ];
+        }
+
+        // Response DIBEKUKAN dari record batch di store (server-side), BUKAN
+        // dari yang ter-fetch di client — client bisa saja belum memuatnya
+        // (lazy). Kalau batch sudah tergeser dari buffer, response = null.
+        // (§4.2: trace membekukan data, jadi harus utuh di titik capture.)
+        $response = null;
+        if ((bool) config('querydebug.response.enabled', true)) {
+            $bid = isset($s['id']) ? (string) $s['id'] : '';
+            if ($bid !== '') {
+                $batch = QueryDebugStore::findBatch($identity, $bid);
+                if ($batch !== null && isset($batch['response']) && is_array($batch['response'])) {
+                    $response = $this->normalizeResponse($batch['response']);
+                }
+            }
         }
 
         return [
@@ -193,7 +209,29 @@ class TraceService
             'conn'       => isset($s['conn']) ? $s['conn'] : null,
             'input'      => isset($s['input']) && is_array($s['input']) ? $s['input'] : [],
             'error'      => isset($s['error']) ? $s['error'] : null,
+            'response'   => $response,
             'queries'    => $queries,
+        ];
+    }
+
+    /**
+     * Bentuk response yang disimpan permanen di trace. Body untuk json/text;
+     * untuk binary/skip hanya metadata. Batas ukuran & redaksi sudah diterapkan
+     * saat capture di middleware (ResponseCapturer), jadi di sini tinggal
+     * memilih field yang relevan.
+     */
+    private function normalizeResponse(array $r): array
+    {
+        $kind = isset($r['kind']) ? (string) $r['kind'] : 'body';
+
+        return [
+            'content_type' => isset($r['content_type']) ? $r['content_type'] : null,
+            'status'       => isset($r['status']) ? $r['status'] : null,
+            'kind'         => $kind,
+            'size'         => isset($r['size']) ? $r['size'] : null,
+            'truncated'    => ! empty($r['truncated']),
+            'filename'     => isset($r['filename']) ? $r['filename'] : null,
+            'body'         => ($kind === 'body' && isset($r['body'])) ? $r['body'] : null,
         ];
     }
 }

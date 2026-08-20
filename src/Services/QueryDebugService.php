@@ -53,7 +53,85 @@ class QueryDebugService
             'min_seq'         => QueryDebugStore::minSeq($identity),
             'generation'      => $generation,
             'full'            => $full,
-            'batches'         => QueryDebugInsight::decorate($batches),
+            'batches'         => $this->stripHeavy(QueryDebugInsight::decorate($batches)),
+        ];
+    }
+
+    /**
+     * Buang field BERAT (response body) dari batch sebelum dikirim di /recent —
+     * response diambil lazy lewat batch/{id}/response. Yang ikut hanyalah
+     * ringkasan response (status/tipe/ukuran/truncated) supaya UI tahu ada
+     * response tanpa menyeret body-nya tiap poll.
+     */
+    private function stripHeavy(array $batches): array
+    {
+        foreach ($batches as $i => $batch) {
+            if (isset($batch['response']) && is_array($batch['response'])) {
+                $batches[$i]['response'] = \Sd1\QueryViewer\Support\ResponseCapturer::meta($batch['response']);
+            }
+        }
+
+        return $batches;
+    }
+
+    /**
+     * Detail satu batch untuk dashboard (lazy) — queries + payload + context,
+     * TANPA response body (response tetap lewat endpoint terpisah).
+     */
+    public function batch(string $identity, string $batchId): array
+    {
+        $batch = QueryDebugStore::findBatch($identity, $batchId);
+        if ($batch === null) {
+            throw new QueryDebugException('Batch tidak ditemukan (mungkin sudah tergeser dari buffer).', 404);
+        }
+
+        $decorated = QueryDebugInsight::decorate([$batch]);
+        $one = $this->stripHeavy($decorated)[0];
+
+        return $one;
+    }
+
+    /**
+     * Payload request teredaksi satu batch (lazy).
+     */
+    public function batchPayload(string $identity, string $batchId): array
+    {
+        $batch = QueryDebugStore::findBatch($identity, $batchId);
+        if ($batch === null) {
+            throw new QueryDebugException('Batch tidak ditemukan (mungkin sudah tergeser dari buffer).', 404);
+        }
+
+        return [
+            'input'   => isset($batch['input']) && is_array($batch['input']) ? $batch['input'] : [],
+            'context' => isset($batch['context']) && is_array($batch['context']) ? $batch['context'] : [],
+        ];
+    }
+
+    /**
+     * Response body satu batch (lazy) — hanya di sinilah body dikirim ke client.
+     */
+    public function batchResponse(string $identity, string $batchId): array
+    {
+        $batch = QueryDebugStore::findBatch($identity, $batchId);
+        if ($batch === null) {
+            throw new QueryDebugException('Batch tidak ditemukan (mungkin sudah tergeser dari buffer).', 404);
+        }
+
+        $response = isset($batch['response']) && is_array($batch['response']) ? $batch['response'] : null;
+
+        if ($response === null) {
+            return ['captured' => false];
+        }
+
+        return [
+            'captured'     => true,
+            'content_type' => isset($response['content_type']) ? $response['content_type'] : null,
+            'status'       => isset($response['status']) ? $response['status'] : null,
+            'kind'         => isset($response['kind']) ? $response['kind'] : null,
+            'size'         => isset($response['size']) ? $response['size'] : null,
+            'filename'     => isset($response['filename']) ? $response['filename'] : null,
+            'truncated'    => ! empty($response['truncated']),
+            'body'         => isset($response['body']) ? $response['body'] : null,
         ];
     }
 

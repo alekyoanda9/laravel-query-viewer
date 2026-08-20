@@ -6,6 +6,7 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
 use Sd1\QueryViewer\Http\Middleware\InjectQueryViewer;
 use Sd1\QueryViewer\Http\Middleware\LogQueryDebug;
+use Sd1\QueryViewer\Http\Middleware\VerifyBrowserAccess;
 use Sd1\QueryViewer\Http\Middleware\VerifyQueryDebugKey;
 use Sd1\QueryViewer\Http\Middleware\VerifyTraceAccess;
 
@@ -28,6 +29,10 @@ class QueryViewerServiceProvider extends ServiceProvider
         // browser, jadi tidak bisa membawa header X-Query-Debug-Key).
         $router->aliasMiddleware('querydebug.trace', VerifyTraceAccess::class);
 
+        // Gate untuk halaman dashboard /viewer + endpoint JSON-nya (juga dibuka
+        // lewat navigasi browser). Berbagi flag session dengan trace viewer.
+        $router->aliasMiddleware('querydebug.browser', VerifyBrowserAccess::class);
+
         // Dengarkan query di seluruh request web (middleware sendiri yang cek
         // apakah sesi sudah unlock — kalau belum, ia transparan).
         $router->pushMiddlewareToGroup('web', LogQueryDebug::class);
@@ -44,6 +49,7 @@ class QueryViewerServiceProvider extends ServiceProvider
 
             $this->publishes([
                 __DIR__ . '/../resources/assets/js/query-debug.js' => public_path('vendor/query-viewer/query-debug.js'),
+                __DIR__ . '/../resources/assets/js/query-debug-viewer.js' => public_path('vendor/query-viewer/query-debug-viewer.js'),
             ], 'query-viewer-assets');
 
             $this->publishes([

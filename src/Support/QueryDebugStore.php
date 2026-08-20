@@ -160,6 +160,24 @@ class QueryDebugStore
     }
 
     /**
+     * Ambil satu BATCH utuh berdasarkan id stabilnya. Dipakai endpoint lazy
+     * detail (batch/{id}, batch/{id}/payload, batch/{id}/response) dan
+     * TraceService saat menyalin response server-side.
+     *
+     * @return array|null
+     */
+    public static function findBatch($usid, string $id)
+    {
+        foreach (self::recentFor($usid) as $batch) {
+            if ((string) (isset($batch['id']) ? $batch['id'] : '') === $id) {
+                return $batch;
+            }
+        }
+
+        return null;
+    }
+
+    /**
      * Ambil satu query berdasarkan ID STABIL batch + indeks query di dalamnya.
      *
      * Dipakai endpoint EXPLAIN & Sampel Data: panel mengirim id batch + indeks

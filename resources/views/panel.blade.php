@@ -864,6 +864,7 @@
             <div class="qd-head">
                 <b>Query Viewer</b>
                 <button data-qd="refresh">Refresh</button>
+                <button data-qd="maximize" title="Buka dashboard penuh (halaman /viewer)">Maximize</button>
                 <button data-qd="clear">Clear</button>
                 <button data-qd="capture" title="Simpan langkah-langkah terakhir jadi trace untuk dev">Ambil Kasus</button>
                 <button data-qd="lock" title="Matikan pengumpulan query untuk sesi ini">Lock</button>
@@ -947,6 +948,7 @@
             lockUrl: '{{ url('/dev/query-debug/lock') }}',
             explainUrl: '{{ url('/dev/query-debug/explain') }}',
             sampleUrl: '{{ url('/dev/query-debug/sample') }}',
+            viewerUrl: '{{ url(config('querydebug.route_prefix', 'dev/query-debug') . '/viewer') }}',
             captureUrl: '{{ url(config('querydebug.route_prefix', 'dev/query-debug') . '/trace/capture') }}',
             traceEnabled: {{ config('querydebug.trace.enabled', true) ? 'true' : 'false' }},
             traceCategories: {!! json_encode(config('querydebug.trace.categories', []), JSON_UNESCAPED_UNICODE) !!},

@@ -202,6 +202,17 @@
         });
     }
 
+    // Buka dashboard penuh (/viewer). Halaman itu digate lewat session; supaya
+    // dev tidak perlu mengetik key lagi, kita bawa API key sekali lewat ?key=
+    // — middleware VerifyBrowserAccess menukarnya jadi flag session lalu
+    // redirect ke URL bersih tanpa key (sama seperti trace viewer).
+    function openViewer() {
+        if (!CFG.viewerUrl) return;
+        var key = getKey();
+        var url = CFG.viewerUrl + (key ? ('?key=' + encodeURIComponent(key)) : '');
+        window.open(url, '_blank');
+    }
+
     function lockSession() {
         var key = getKey();
         fetch(CFG.lockUrl, {
@@ -963,6 +974,7 @@
                 included: st.included,
                 fail_point: st.failPoint,
                 group: groupIndex[st.group],
+                id: b.id || null,
                 method: b.method, path: b.path, route: b.route,
                 origin: originOf(b),
                 is_ajax: b.is_ajax, at: b.at, status: b.status, dur_ms: b.dur_ms,
@@ -1087,6 +1099,7 @@
 
         if (action === 'close') return close();
         if (action === 'refresh') return fetchRecent();
+        if (action === 'maximize') return openViewer();
         if (action === 'clear') return clearAll();
         if (action === 'lock') return lockSession();
         if (action === 'capture') return openCapture();

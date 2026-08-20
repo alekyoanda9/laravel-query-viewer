@@ -24,6 +24,9 @@ Route::group([
 ], function () {
     Route::get('/recent', [QueryDebugController::class, 'recent']);
     Route::get('/clear', [QueryDebugController::class, 'clear']);
+    Route::get('/batch/{id}', [QueryDebugController::class, 'batch']);
+    Route::get('/batch/{id}/payload', [QueryDebugController::class, 'batchPayload']);
+    Route::get('/batch/{id}/response', [QueryDebugController::class, 'batchResponse']);
     Route::post('/explain', [QueryDebugController::class, 'explain']);
     Route::post('/sample', [QueryDebugController::class, 'sample']);
     Route::post('/unlock', [QueryDebugController::class, 'unlock']);
@@ -31,6 +34,28 @@ Route::group([
 
     // Support menekan tombol di panel -> promote ring buffer jadi trace.
     Route::post('/trace/capture', [TraceController::class, 'capture']);
+});
+
+/*
+| Halaman DASHBOARD penuh (/viewer): DIBUKA DEV LEWAT BROWSER, jadi gate-nya
+| lewat session (key sekali via ?key=, lalu flag session yang dibagi dengan
+| trace viewer) — bukan header X-Query-Debug-Key. Endpoint JSON-nya (recent,
+| batch/*, explain, sample) ikut gate yang sama supaya AJAX dari halaman ini
+| tidak perlu menitipkan API key di header/HTML. Semuanya memanggil controller
+| yang SAMA dengan panel — "reuse the engine", bukan pipeline data baru.
+*/
+Route::group([
+    'prefix'     => $prefix . '/viewer',
+    'middleware' => ['web', 'querydebug.browser'],
+], function () {
+    Route::get('/', [QueryDebugController::class, 'viewer']);
+    Route::get('/recent', [QueryDebugController::class, 'recent']);
+    Route::get('/clear', [QueryDebugController::class, 'clear']);
+    Route::get('/batch/{id}', [QueryDebugController::class, 'batch']);
+    Route::get('/batch/{id}/payload', [QueryDebugController::class, 'batchPayload']);
+    Route::get('/batch/{id}/response', [QueryDebugController::class, 'batchResponse']);
+    Route::post('/explain', [QueryDebugController::class, 'explain']);
+    Route::post('/sample', [QueryDebugController::class, 'sample']);
 });
 
 /*
