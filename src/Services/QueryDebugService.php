@@ -7,6 +7,7 @@ use Sd1\QueryViewer\Repositories\QueryDebugRepository;
 use Sd1\QueryViewer\Support\QueryDebugInsight;
 use Sd1\QueryViewer\Support\QueryDebugSql;
 use Sd1\QueryViewer\Support\QueryDebugStore;
+use Sd1\QueryViewer\Support\StepRedactor;
 
 class QueryDebugService
 {
@@ -18,12 +19,41 @@ class QueryDebugService
         $this->repository = $repository;
     }
 
-    public function recent(string $identity): array
+    /**
+     * DELTA /recent. Client mengirim seq tertinggi yang sudah ia terima
+     * (?after=<seq>) + generation yang ia pegang (?gen=<token>). Server hanya
+     * mengembalikan batch dengan seq > after, plus metadata sinkronisasi.
+     *
+     * Aturan:
+     *  - Kalau generation client BEDA dari server (atau kosong) -> store dianggap
+     *    sudah reset di sisi client: server mengirim FULL snapshot (after
+     *    diabaikan) dan menandai 'full' => true supaya client membuang lokalnya.
+     *  - Insight per-batch dihitung SEKALI untuk batch baru yang dikirim (bukan
+     *    seluruh buffer tiap poll).
+     */
+    public function recent(string $identity, int $afterSeq = 0, string $gen = ''): array
     {
+        $generation = QueryDebugStore::generation($identity);
+        $full       = ($gen === '' || $gen !== $generation);
+
+        $batches = $full
+            ? QueryDebugStore::recentFor($identity)
+            : QueryDebugStore::since($identity, $afterSeq);
+
+        $limit = (int) config('querydebug.poll.max_batches_per_response', 100);
+        if ($limit > 0 && count($batches) > $limit) {
+            // Ambil yang TERBARU (recentFor/since sudah terbaru-dulu).
+            $batches = array_slice($batches, 0, $limit);
+        }
+
         return [
             'identity'        => $identity,
             'insight_enabled' => QueryDebugInsight::enabled(),
-            'batches'         => QueryDebugInsight::decorate(QueryDebugStore::recentFor($identity)),
+            'head'            => QueryDebugStore::head($identity),
+            'min_seq'         => QueryDebugStore::minSeq($identity),
+            'generation'      => $generation,
+            'full'            => $full,
+            'batches'         => QueryDebugInsight::decorate($batches),
         ];
     }
 
@@ -33,20 +63,94 @@ class QueryDebugService
     }
 
     /**
-     * EXPLAIN satu query dari store milik identity ini. Client mengirim POSISI
-     * (indeks batch + indeks query) + id verifikasi — bukan string SQL.
+     * EXPLAIN satu query dari store milik identity ini. Client mengirim ID BATCH
+     * yang stabil + indeks query + id verifikasi (hash SQL) — bukan string SQL,
+     * dan bukan indeks posisional yang bisa bergeser.
      */
-    public function explain(string $identity, int $batchIndex, int $queryIndex, string $id, bool $analyze): array
+    public function explain(string $identity, string $batchId, int $queryIndex, string $id): array
     {
         if (! QueryDebugInsight::explainEnabled()) {
             throw new QueryDebugException('Fitur EXPLAIN tidak diaktifkan di server ini.', 403);
         }
 
-        if ($analyze && ! QueryDebugInsight::analyzeEnabled()) {
-            throw new QueryDebugException('EXPLAIN ANALYZE dimatikan di server ini.', 403);
+        $sql = $this->resolveReadOnlySql($identity, $batchId, $queryIndex, $id);
+
+        $driver = $this->repository->driverName();
+        if ($driver !== 'pgsql') {
+            throw new QueryDebugException(
+                'EXPLAIN hanya didukung untuk koneksi PostgreSQL (driver koneksi ini: ' . $driver . ').',
+                422
+            );
         }
 
-        $found = QueryDebugStore::locate($identity, $batchIndex, $queryIndex);
+        try {
+            $result = $this->repository->explain(
+                $sql,
+                (int) config('querydebug.insight.explain.timeout_ms', 5000)
+            );
+        } catch (\Exception $e) {
+            throw new QueryDebugException('EXPLAIN gagal: ' . $e->getMessage(), 422);
+        }
+
+        return [
+            'sql'        => $sql,
+            'plan'       => $result['plan'],
+            'elapsed_ms' => $result['elapsed_ms'],
+        ];
+    }
+
+    /**
+     * SAMPEL DATA (Fitur 5): jalankan ulang SELECT read-only, ambil beberapa
+     * baris contoh. Reuse guard + resolver yang SAMA dengan EXPLAIN; bedanya
+     * hanya di gate config-nya sendiri (querydebug.sample.enabled, default mati)
+     * dan redaksi berbasis nama kolom sebelum hasil dikembalikan.
+     */
+    public function sample(string $identity, string $batchId, int $queryIndex, string $id): array
+    {
+        if (! QueryDebugInsight::sampleEnabled()) {
+            throw new QueryDebugException('Fitur Sampel Data tidak diaktifkan di server ini.', 403);
+        }
+
+        $sql = $this->resolveReadOnlySql($identity, $batchId, $queryIndex, $id);
+
+        $driver = $this->repository->driverName();
+        if ($driver !== 'pgsql') {
+            throw new QueryDebugException(
+                'Sampel Data hanya didukung untuk koneksi PostgreSQL (driver koneksi ini: ' . $driver . ').',
+                422
+            );
+        }
+
+        $timeout = config('querydebug.sample.statement_timeout_ms');
+        $timeout = ($timeout === null || $timeout === '')
+            ? (int) config('querydebug.insight.explain.timeout_ms', 5000)
+            : (int) $timeout;
+
+        try {
+            $result = $this->repository->sample(
+                $sql,
+                (int) config('querydebug.sample.max_rows', 3),
+                $timeout
+            );
+        } catch (\Exception $e) {
+            throw new QueryDebugException('Sampel Data gagal: ' . $e->getMessage(), 422);
+        }
+
+        return [
+            'columns'    => $result['columns'],
+            'rows'       => StepRedactor::sampleRows($result['columns'], $result['rows']),
+            'elapsed_ms' => $result['elapsed_ms'],
+        ];
+    }
+
+    /**
+     * Cari query di store (by-id batch stabil), verifikasi masih query yang sama
+     * (hash), dan pastikan aman dijalankan read-only. Dipakai bersama oleh
+     * EXPLAIN & Sampel Data.
+     */
+    private function resolveReadOnlySql(string $identity, string $batchId, int $queryIndex, string $id): string
+    {
+        $found = QueryDebugStore::find($identity, $batchId, $queryIndex);
 
         if ($found === null) {
             throw new QueryDebugException('Query tidak ditemukan di daftar. Klik Refresh lalu coba lagi.', 404);
@@ -64,48 +168,25 @@ class QueryDebugService
         $sql = rtrim(trim(isset($query['raw']) ? (string) $query['raw'] : ''), ';');
 
         if ($sql === '') {
-            throw new QueryDebugException('Query kosong, tidak bisa di-EXPLAIN.', 422);
+            throw new QueryDebugException('Query kosong, tidak bisa dijalankan.', 422);
         }
 
         $maxLength = (int) config('querydebug.insight.explain.max_sql_length', 20000);
         if (strlen($sql) > $maxLength) {
             throw new QueryDebugException(
-                'Query terlalu panjang untuk di-EXPLAIN (' . strlen($sql) . ' karakter, batas ' . $maxLength . ').',
+                'Query terlalu panjang untuk dijalankan (' . strlen($sql) . ' karakter, batas ' . $maxLength . ').',
                 422
             );
         }
 
         if (! QueryDebugSql::isReadOnly($sql)) {
             throw new QueryDebugException(
-                'Hanya query SELECT yang boleh di-EXPLAIN. Query ini terdeteksi mengubah data '
+                'Hanya query SELECT yang boleh dijalankan. Query ini terdeteksi mengubah data '
                 . 'atau bukan statement tunggal, jadi tidak dijalankan.',
                 422
             );
         }
 
-        $driver = $this->repository->driverName();
-        if ($driver !== 'pgsql') {
-            throw new QueryDebugException(
-                'EXPLAIN hanya didukung untuk koneksi PostgreSQL (driver koneksi ini: ' . $driver . ').',
-                422
-            );
-        }
-
-        try {
-            $result = $this->repository->explain(
-                $sql,
-                $analyze,
-                (int) config('querydebug.insight.explain.timeout_ms', 5000)
-            );
-        } catch (\Exception $e) {
-            throw new QueryDebugException('EXPLAIN gagal: ' . $e->getMessage(), 422);
-        }
-
-        return [
-            'analyze'    => $analyze,
-            'sql'        => $sql,
-            'plan'       => $result['plan'],
-            'elapsed_ms' => $result['elapsed_ms'],
-        ];
+        return $sql;
     }
 }

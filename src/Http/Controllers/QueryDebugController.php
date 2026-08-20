@@ -27,9 +27,13 @@ class QueryDebugController extends Controller
         $this->service = $service;
     }
 
-    public function recent()
+    public function recent(Request $request)
     {
-        return $this->ok($this->service->recent(Context::identity()));
+        return $this->ok($this->service->recent(
+            Context::identity(),
+            (int) $request->query('after', 0),
+            (string) $request->query('gen', '')
+        ));
     }
 
     public function clear()
@@ -44,10 +48,25 @@ class QueryDebugController extends Controller
         try {
             $result = $this->service->explain(
                 Context::identity(),
-                (int) $request->input('batch'),
+                (string) $request->input('bid'),
                 (int) $request->input('query'),
-                (string) $request->input('id'),
-                filter_var($request->input('analyze'), FILTER_VALIDATE_BOOLEAN)
+                (string) $request->input('id')
+            );
+
+            return $this->ok($result);
+        } catch (QueryDebugException $e) {
+            return $this->fail($e->getMessage(), $e->getStatusCode());
+        }
+    }
+
+    public function sample(Request $request)
+    {
+        try {
+            $result = $this->service->sample(
+                Context::identity(),
+                (string) $request->input('bid'),
+                (int) $request->input('query'),
+                (string) $request->input('id')
             );
 
             return $this->ok($result);

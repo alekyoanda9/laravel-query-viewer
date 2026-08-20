@@ -171,6 +171,10 @@ class TraceService
                 'ms'     => isset($q['ms']) ? $q['ms'] : null,
                 'failed' => ! empty($q['failed']),
                 'error'  => isset($q['error']) ? $q['error'] : null,
+                // file:line pemanggil query (Fitur 2). Trace itu permanen &
+                // portable, jadi path relatif di sini justru makin berguna.
+                'file'   => isset($q['file']) && $q['file'] !== '' ? (string) $q['file'] : null,
+                'line'   => isset($q['line']) && $q['line'] !== null ? (int) $q['line'] : null,
             ];
         }
 

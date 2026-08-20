@@ -25,6 +25,7 @@ Route::group([
     Route::get('/recent', [QueryDebugController::class, 'recent']);
     Route::get('/clear', [QueryDebugController::class, 'clear']);
     Route::post('/explain', [QueryDebugController::class, 'explain']);
+    Route::post('/sample', [QueryDebugController::class, 'sample']);
     Route::post('/unlock', [QueryDebugController::class, 'unlock']);
     Route::post('/lock', [QueryDebugController::class, 'lock']);
 

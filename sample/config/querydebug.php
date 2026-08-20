@@ -177,15 +177,110 @@ return [
 
             'enabled' => env('QUERY_DEBUG_EXPLAIN', false),
 
-            // EXPLAIN ANALYZE BENAR-BENAR mengeksekusi query. Dijaga berlapis
-            // (whitelist SELECT + transaksi selalu rollback + statement_timeout),
-            // tapi tetap default mati.
-            'analyze' => env('QUERY_DEBUG_EXPLAIN_ANALYZE', false),
+            // Catatan: varian EXPLAIN ANALYZE (yang benar-benar MENGEKSEKUSI
+            // query) sudah DIHAPUS dari package — dianggap terlalu berisiko
+            // tidak sengaja dijalankan pada query berat/mengubah data di server
+            // testing. Hanya EXPLAIN biasa (read-only, selalu di transaksi
+            // rollback + statement_timeout) yang tersisa.
 
             'timeout_ms' => env('QUERY_DEBUG_EXPLAIN_TIMEOUT_MS', 5000),
 
             'max_sql_length' => env('QUERY_DEBUG_EXPLAIN_MAX_SQL', 20000),
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Delta polling (/recent)
+    |--------------------------------------------------------------------------
+    |
+    | Sejak v2.3.0 endpoint /recent mengirim DELTA: tiap batch punya nomor urut
+    | monotonik (seq), client menyimpan seq tertinggi yang sudah diterima dan
+    | hanya minta yang lebih baru (?after=<seq>&gen=<generation>). Server hanya
+    | mengembalikan batch dengan seq > after, plus sinyal head/min_seq/generation
+    | untuk merge/evict/reset di client. Efeknya: tiap batch dikirim SEKALI, bukan
+    | tiap poll — payload polling turun drastis di sesi QA panjang.
+    |
+    */
+
+    'poll' => [
+
+        // Interval polling panel (ms). Client tetap boleh mempercepat sesaat
+        // setelah ajaxComplete.
+        'interval_ms' => env('QUERY_DEBUG_POLL_MS', 2500),
+
+        // Batasi jumlah batch yang dikirim dalam satu response saat client
+        // minta full snapshot (after=0 / generation berubah), supaya burst
+        // pertama tidak membengkak.
+        'max_batches_per_response' => env('QUERY_DEBUG_POLL_MAX_BATCHES', 100),
+
+        // (Disiapkan untuk Fitur 1b) pisah ringkasan vs detail berat + endpoint
+        // lazy batch/{id}/*. Belum diaktifkan di versi ini.
+        'lazy_detail' => env('QUERY_DEBUG_POLL_LAZY', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sumber pemanggil query (file:line)
+    |--------------------------------------------------------------------------
+    |
+    | Tiap query menyimpan file & baris kode yang memicunya (à la Telescope
+    | FetchesStackTrace) — diambil dari frame pertama di luar vendor/framework
+    | dan direktori package ini. Path disimpan RELATIF terhadap base_path()
+    | untuk privasi (tidak membocorkan struktur absolut server) & portabilitas.
+    |
+    */
+
+    'source' => [
+
+        'enabled' => env('QUERY_DEBUG_SOURCE', true),
+
+        // Batas kedalaman debug_backtrace supaya tidak menelusuri stack penuh
+        // di halaman dengan banyak query.
+        'depth' => env('QUERY_DEBUG_SOURCE_DEPTH', 30),
+
+        // Substring path tambahan yang dianggap "internal" (dilewati saat
+        // mencari frame pemanggil). /vendor/ dan direktori package sudah
+        // otomatis dilewati.
+        'ignore' => [
+            // 'app/Http/Kernel.php',
+        ],
+
+        // >1 = simpan N frame teratas (mini call-stack) untuk membedah N+1.
+        // Default 1 (satu frame) supaya ringan.
+        'stack_depth' => env('QUERY_DEBUG_SOURCE_STACK_DEPTH', 1),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sampling hasil query (Data Contoh)
+    |--------------------------------------------------------------------------
+    |
+    | Tombol "Sampel Data" per query menjalankan ULANG sebuah SELECT read-only
+    | (guard + transaksi rollback + statement_timeout yang SAMA dengan EXPLAIN)
+    | lalu menampilkan beberapa baris contoh. Karena membawa potongan data asli
+    | (meski dari server testing), kelas risikonya beda dari EXPLAIN/insight:
+    | DEFAULT MATI, harus dinyalakan sadar per instalasi lewat .env.
+    |
+    | Untuk versi awal: semua kolom ditampilkan apa adanya KECUALI yang cocok
+    | trace.redact_keys (nama kolom password/token/dll -> [redacted]).
+    |
+    */
+
+    'sample' => [
+
+        // Kill-switch wajib. Terpisah dari 'enabled' global.
+        'enabled' => env('QUERY_DEBUG_SAMPLE', false),
+
+        // Batas baris yang diambil (dibungkus SELECT * FROM (<sql>) AS q LIMIT n).
+        'max_rows' => env('QUERY_DEBUG_SAMPLE_MAX_ROWS', 3),
+
+        // null = ikut timeout EXPLAIN (insight.explain.timeout_ms).
+        'statement_timeout_ms' => env('QUERY_DEBUG_SAMPLE_TIMEOUT_MS', null),
+
+        // null = ikut trace.max_value_length. Nilai kolom yang sangat panjang
+        // tetap dipotong.
+        'max_value_length' => null,
     ],
 
 ];

@@ -27,8 +27,35 @@
     var dupOnly = false;
 
     var explainCache = {};
+    var sampleCache = {};
     var collapsedGroups = {};
     var collapsedBatches = {};
+
+    // ---- delta polling state ----------------------------------------------
+    // lastBatches disusun ulang dari batchesById tiap merge, urut seq menurun
+    // (terbaru dulu) — sama seperti recentFor() di server.
+    var lastSeq = 0;
+    var generation = '';
+    var batchesById = {};
+
+    function resetDeltaState() {
+        lastSeq = 0;
+        generation = '';
+        batchesById = {};
+        lastBatches = [];
+        explainCache = {};
+        sampleCache = {};
+    }
+
+    function rebuildFromMap() {
+        var arr = [];
+        for (var id in batchesById) {
+            if (batchesById.hasOwnProperty(id)) arr.push(batchesById[id]);
+        }
+        // seq menurun: terbaru dulu.
+        arr.sort(function (a, b) { return (b.seq || 0) - (a.seq || 0); });
+        lastBatches = arr;
+    }
 
     // markdown yang sedang ditampilkan di modal (untuk copy/download)
     var currentExport = { md: '', filename: 'query-viewer.md' };
@@ -78,7 +105,12 @@
         var key = getKey();
         if (!key) { renderKeyForm(); return; }
 
-        fetch(CFG.recentUrl, {
+        // Cursor delta: kirim seq tertinggi yang sudah kita punya + generation.
+        var sep = CFG.recentUrl.indexOf('?') === -1 ? '?' : '&';
+        var url = CFG.recentUrl + sep + 'after=' + encodeURIComponent(lastSeq) +
+            '&gen=' + encodeURIComponent(generation);
+
+        fetch(url, {
             headers: authHeaders(),
             credentials: 'same-origin'
         }).then(function (res) {
@@ -87,11 +119,55 @@
         }).then(function (json) {
             if (!json) return;
             var payload = json.data || json;
-            lastBatches = (payload && payload.batches) || [];
+            mergeDelta(payload);
             render();
         }).catch(function () {
             body.innerHTML = '<div class="qd-empty">Gagal memuat query.</div>';
         });
+    }
+
+    // Terapkan aturan merge delta (lihat §1.2 dokumen desain):
+    //  1. generation berbeda / server tandai full -> buang lokal, muat penuh.
+    //  2. append/replace batch baru by id, set lastSeq = head.
+    //  3. evict batch lokal yang seq < min_seq (sudah dibuang ring buffer server).
+    function mergeDelta(payload) {
+        if (!payload) return;
+
+        var serverGen = payload.generation || '';
+        var isFull = !!payload.full || (serverGen && serverGen !== generation);
+
+        if (isFull) {
+            // store di server sudah reset (Clear/Lock/TTL habis) atau ini muatan
+            // pertama: buang semua lokal, mulai dari nol.
+            batchesById = {};
+            explainCache = {};
+            sampleCache = {};
+            lastSeq = 0;
+        }
+
+        generation = serverGen || generation;
+
+        var batches = (payload && payload.batches) || [];
+        batches.forEach(function (b) {
+            var id = b.id || ('seq-' + (b.seq || 0));
+            batchesById[id] = b;
+        });
+
+        if (typeof payload.head === 'number') {
+            lastSeq = payload.head;
+        }
+
+        // evict: buang batch yang lebih tua dari batas bawah ring buffer server.
+        var minSeq = typeof payload.min_seq === 'number' ? payload.min_seq : 0;
+        if (minSeq > 0) {
+            for (var id in batchesById) {
+                if (batchesById.hasOwnProperty(id) && (batchesById[id].seq || 0) < minSeq) {
+                    delete batchesById[id];
+                }
+            }
+        }
+
+        rebuildFromMap();
     }
 
     function clearAll() {
@@ -101,8 +177,7 @@
             headers: authHeaders(),
             credentials: 'same-origin'
         }).then(function () {
-            lastBatches = [];
-            explainCache = {};
+            resetDeltaState();
             render();
         });
     }
@@ -139,15 +214,14 @@
             credentials: 'same-origin'
         }).finally(function () {
             clearKey();
-            lastBatches = [];
-            explainCache = {};
+            resetDeltaState();
             stopPolling();
             renderKeyForm();
         });
     }
 
-    function runExplain(batchIndex, queryIndex, qid, analyze) {
-        explainCache[qid] = { loading: true, analyze: analyze };
+    function runExplain(bid, queryIndex, qid) {
+        explainCache[qid] = { loading: true };
         render();
 
         fetch(CFG.explainUrl, {
@@ -158,30 +232,65 @@
             }),
             credentials: 'same-origin',
             body: JSON.stringify({
-                batch: batchIndex,
+                bid: bid,
                 query: queryIndex,
-                id: qid,
-                analyze: analyze ? 1 : 0
+                id: qid
             })
         }).then(function (res) {
             return res.json().then(function (json) { return { ok: res.ok, json: json }; });
         }).then(function (r) {
             if (!r.ok) {
-                explainCache[qid] = {
-                    error: (r.json && r.json.message) || 'EXPLAIN gagal.',
-                    analyze: analyze
-                };
+                explainCache[qid] = { error: (r.json && r.json.message) || 'EXPLAIN gagal.' };
             } else {
                 var data = (r.json && r.json.data) || {};
                 explainCache[qid] = {
                     plan: data.plan || '(plan kosong)',
-                    elapsed: data.elapsed_ms,
-                    analyze: !!data.analyze
+                    elapsed: data.elapsed_ms
                 };
             }
             render();
         }).catch(function () {
-            explainCache[qid] = { error: 'Gagal menghubungi server.', analyze: analyze };
+            explainCache[qid] = { error: 'Gagal menghubungi server.' };
+            render();
+        });
+    }
+
+    // ---- Sampel Data (Fitur 5) --------------------------------------------
+    // Alur & model keamanan meniru EXPLAIN: kirim id batch stabil + indeks query
+    // + hash verifikasi (bukan SQL). Hasil disimpan sementara di sampleCache
+    // milik JS, tidak ikut /recent.
+    function runSample(bid, queryIndex, qid) {
+        sampleCache[qid] = { loading: true };
+        render();
+
+        fetch(CFG.sampleUrl, {
+            method: 'POST',
+            headers: authHeaders({
+                'X-CSRF-TOKEN': getCsrf(),
+                'Content-Type': 'application/json'
+            }),
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                bid: bid,
+                query: queryIndex,
+                id: qid
+            })
+        }).then(function (res) {
+            return res.json().then(function (json) { return { ok: res.ok, json: json }; });
+        }).then(function (r) {
+            if (!r.ok) {
+                sampleCache[qid] = { error: (r.json && r.json.message) || 'Sampel Data gagal.' };
+            } else {
+                var data = (r.json && r.json.data) || {};
+                sampleCache[qid] = {
+                    columns: data.columns || [],
+                    rows: data.rows || [],
+                    elapsed: data.elapsed_ms
+                };
+            }
+            render();
+        }).catch(function () {
+            sampleCache[qid] = { error: 'Gagal menghubungi server.' };
             render();
         });
     }
@@ -235,6 +344,10 @@
 
         if (dup > 1) {
             out += ' \u00b7 dijalankan ' + dup + '\u00d7 identik dalam request ini';
+        }
+
+        if (q.file) {
+            out += '\n\n**Sumber:** `' + q.file + (q.line ? ':' + q.line : '') + '`';
         }
 
         out += '\n\n' + fence('sql', q.raw);
@@ -480,24 +593,70 @@
         if (!state) return '';
 
         if (state.loading) {
-            return '<div class="qd-explain-out"><div class="qd-explain-head"><b>' +
-                (state.analyze ? 'EXPLAIN ANALYZE' : 'EXPLAIN') +
-                '</b><span>menjalankan\u2026</span></div></div>';
+            return '<div class="qd-explain-out"><div class="qd-explain-head"><b>EXPLAIN</b>' +
+                '<span>menjalankan\u2026</span></div></div>';
         }
 
         if (state.error) {
-            return '<div class="qd-explain-out err"><div class="qd-explain-head"><b>' +
-                (state.analyze ? 'EXPLAIN ANALYZE' : 'EXPLAIN') +
-                '</b><button data-qd="explain-close" data-qid="' + esc(qid) + '">tutup</button></div>' +
+            return '<div class="qd-explain-out err"><div class="qd-explain-head"><b>EXPLAIN</b>' +
+                '<button data-qd="explain-close" data-qid="' + esc(qid) + '">tutup</button></div>' +
                 '<pre>' + esc(state.error) + '</pre></div>';
         }
 
         return '<div class="qd-explain-out">' +
-            '<div class="qd-explain-head"><b>' + (state.analyze ? 'EXPLAIN ANALYZE' : 'EXPLAIN') + '</b>' +
+            '<div class="qd-explain-head"><b>EXPLAIN</b>' +
             '<span>' + Number(state.elapsed || 0).toFixed(1) + ' ms</span>' +
             '<button data-qd="explain-copy">copy plan</button>' +
             '<button data-qd="explain-close" data-qid="' + esc(qid) + '">tutup</button></div>' +
             '<pre>' + esc(state.plan) + '</pre></div>';
+    }
+
+    function renderSampleOutput(qid) {
+        var state = sampleCache[qid];
+        if (!state) return '';
+
+        if (state.loading) {
+            return '<div class="qd-sample-out"><div class="qd-explain-head"><b>Sampel Data</b>' +
+                '<span>menjalankan\u2026</span></div></div>';
+        }
+
+        if (state.error) {
+            return '<div class="qd-sample-out err"><div class="qd-explain-head"><b>Sampel Data</b>' +
+                '<button data-qd="sample-close" data-qid="' + esc(qid) + '">tutup</button></div>' +
+                '<pre>' + esc(state.error) + '</pre></div>';
+        }
+
+        var cols = state.columns || [];
+        var rows = state.rows || [];
+
+        var head = '<div class="qd-sample-out">' +
+            '<div class="qd-explain-head"><b>Sampel Data</b>' +
+            '<span>' + rows.length + ' baris \u00b7 ' + Number(state.elapsed || 0).toFixed(1) + ' ms</span>' +
+            '<button data-qd="sample-close" data-qid="' + esc(qid) + '">tutup</button></div>';
+
+        if (!cols.length) {
+            return head + '<div class="qd-empty">(query tidak mengembalikan kolom apa pun)</div></div>';
+        }
+
+        var table = '<div class="qd-sample-scroll"><table class="qd-sample-table"><thead><tr>';
+        cols.forEach(function (c) { table += '<th>' + esc(c) + '</th>'; });
+        table += '</tr></thead><tbody>';
+
+        if (!rows.length) {
+            table += '<tr><td class="qd-sample-empty" colspan="' + cols.length + '">(0 baris)</td></tr>';
+        } else {
+            rows.forEach(function (row) {
+                table += '<tr>';
+                for (var i = 0; i < cols.length; i++) {
+                    var v = row[i];
+                    table += '<td>' + (v === null || v === undefined ? '<i>NULL</i>' : esc(v)) + '</td>';
+                }
+                table += '</tr>';
+            });
+        }
+        table += '</tbody></table></div>';
+
+        return head + table + '</div>';
     }
 
     function renderBatch(batch, bi) {
@@ -516,6 +675,7 @@
 
         var totalMs = all.reduce(function (a, q) { return a + parseFloat(q.time_ms || 0); }, 0);
         var bkey = batchKey(batch);
+        var bid = batch.id || '';
         var collapsed = !!collapsedBatches[bkey];
         var label = batch.route ? esc(batch.route) : ('/' + esc(batch.path));
 
@@ -561,22 +721,24 @@
                     : '<span class="qd-ms ' + (slow ? 'slow' : '') + '">' + ms.toFixed(1) + ' ms</span>') +
                 (q.op ? '<span class="qd-conn">' + esc(q.op) + (q.table ? ' ' + esc(q.table) : '') + '</span>' : '') +
                 (dup ? '<span class="qd-dup">\u00d7' + counts[q.raw] + ' duplikat</span>' : '') +
+                (q.file ? '<span class="qd-src" title="File & baris yang memicu query ini">' + esc(q.file) + (q.line ? ':' + q.line : '') + '</span>' : '') +
                 '<span class="qd-conn">' + esc(q.connection || '') + '</span>' +
                 '</div>' +
                 '<div class="qd-sql">' +
                 '<div class="qd-actions">' +
                 '<button data-qd="md" data-bi="' + bi + '" data-qi="' + item.qi + '" title="Export query ini ke tiket">MD</button>' +
                 (CFG.explain && qid && !q.failed
-                    ? '<button data-qd="explain" data-bi="' + bi + '" data-qi="' + item.qi + '" data-qid="' + esc(qid) + '">Explain</button>'
+                    ? '<button data-qd="explain" data-bid="' + esc(bid) + '" data-qi="' + item.qi + '" data-qid="' + esc(qid) + '">Explain</button>'
                     : '') +
-                (CFG.explainAnalyze && qid && !q.failed
-                    ? '<button data-qd="explain-analyze" data-bi="' + bi + '" data-qi="' + item.qi + '" data-qid="' + esc(qid) + '" title="Menjalankan query-nya sungguhan di dalam transaksi yang langsung di-rollback">Analyze</button>'
+                (CFG.sample && qid && !q.failed
+                    ? '<button data-qd="sample" data-bid="' + esc(bid) + '" data-qi="' + item.qi + '" data-qid="' + esc(qid) + '" title="Ambil beberapa baris contoh (read-only, langsung di-rollback)">Sampel</button>'
                     : '') +
                 '<button class="qd-copy" data-qd="copy">Copy</button>' +
                 '</div>' +
                 '<pre>' + esc(q.raw) + '</pre>' +
                 '</div>' +
                 renderExplainOutput(qid) +
+                renderSampleOutput(qid) +
                 '</div>';
         });
 
@@ -808,7 +970,10 @@
                 input: b.input || {},
                 error: b.error || null,
                 queries: (b.queries || []).map(function (q) {
-                    return { raw: q.raw, ms: q.time_ms, failed: !!q.failed, error: q.error || null };
+                    return {
+                        raw: q.raw, ms: q.time_ms, failed: !!q.failed, error: q.error || null,
+                        file: q.file || null, line: q.line || null
+                    };
                 })
             };
         });
@@ -980,12 +1145,11 @@
             return;
         }
 
-        if (action === 'explain' || action === 'explain-analyze') {
+        if (action === 'explain') {
             runExplain(
-                parseInt(t.getAttribute('data-bi'), 10),
+                t.getAttribute('data-bid'),
                 parseInt(t.getAttribute('data-qi'), 10),
-                t.getAttribute('data-qid'),
-                action === 'explain-analyze'
+                t.getAttribute('data-qid')
             );
             return;
         }
@@ -998,6 +1162,21 @@
 
         if (action === 'explain-close') {
             delete explainCache[t.getAttribute('data-qid')];
+            render();
+            return;
+        }
+
+        if (action === 'sample') {
+            runSample(
+                t.getAttribute('data-bid'),
+                parseInt(t.getAttribute('data-qi'), 10),
+                t.getAttribute('data-qid')
+            );
+            return;
+        }
+
+        if (action === 'sample-close') {
+            delete sampleCache[t.getAttribute('data-qid')];
             render();
             return;
         }

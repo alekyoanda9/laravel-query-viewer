@@ -11,6 +11,8 @@ use Sd1\QueryViewer\Support\QueryDebugSql;
 use Sd1\QueryViewer\Support\QueryDebugStore;
 use Sd1\QueryViewer\Support\StepRedactor;
 
+use Illuminate\Support\Facades\Log;
+
 class LogQueryDebug
 {
     public function handle($request, Closure $next)
@@ -36,11 +38,15 @@ class LogQueryDebug
         $status     = null;
 
         DB::connection($connection)->listen(function ($query) use ($collector) {
+            $source = $this->captureSource();
+
             $collector->record([
                 'connection' => $query->connectionName,
                 'time_ms'    => $query->time,
                 'sql'        => $query->sql,
                 'raw'        => QueryDebugSql::interpolate($query->sql, $query->bindings),
+                'file'       => $source['file'],
+                'line'       => $source['line'],
             ]);
         });
 
@@ -134,6 +140,8 @@ class LogQueryDebug
             $raw = $sql; // interpolasi gagal (kasus langka) -> tampilkan template mentah
         }
 
+        $source = $this->captureSource();
+
         $collector->record([
             'connection' => method_exists($e, 'getConnectionName') ? $e->getConnectionName() : null,
             'time_ms'    => 0,
@@ -141,7 +149,205 @@ class LogQueryDebug
             'raw'        => $raw,
             'failed'     => true,
             'error'      => $this->shortMessage($e->getMessage()),
+            'file'       => $source['file'],
+            'line'       => $source['line'],
         ]);
+    }
+
+    /**
+     * Tangkap file & baris kode PEMANGGIL query — mengikuti pola Telescope
+     * FetchesStackTrace, tapi dengan prioritas WHITELIST bukan cuma blacklist:
+     *
+     *   1. Cari frame pertama yang jelas milik kode developer (app/, routes/)
+     *      — ini paling actionable buat programmer, langsung tunjuk
+     *      Controller/Model/Service yang relevan.
+     *   2. Kalau sampai akhir trace tidak ada frame app/ sama sekali (mis.
+     *      query terpicu murni dari lazy-load relasi saat Blade merender,
+     *      Controller sudah selesai lebih dulu), pakai fallback: frame
+     *      pertama yang bukan vendor/package-sendiri. Kalau fallback itu
+     *      compiled view (storage/framework/views/xxxx.php), resolve balik
+     *      ke path .blade.php asli supaya tetap actionable.
+     *
+     * @return array{file:?string,line:?int}
+     */
+    private function captureSource(): array
+    {
+        if (! (bool) config('querydebug.source.enabled', true)) {
+            return ['file' => null, 'line' => null];
+        }
+
+        $depth = (int) config('querydebug.source.depth', 30);
+        if ($depth < 1) {
+            $depth = 30;
+        }
+
+        $frames = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, $depth);
+
+        $fallback = null;
+
+        foreach ($frames as $frame) {
+            if (! isset($frame['file'])) {
+                continue;
+            }
+
+            $file = str_replace('\\', '/', $frame['file']);
+
+            if ($this->isInternalFrame($file)) {
+                continue;
+            }
+
+            $line = isset($frame['line']) ? (int) $frame['line'] : null;
+
+            // Prioritas #1: kode milik developer (app/, routes/) — paling
+            // berguna buat dilihat programmer.
+            if ($this->isAppFrame($file)) {
+                return [
+                    'file' => $this->relativePath($frame['file']),
+                    'line' => $line,
+                ];
+            }
+
+            // Bukan vendor, bukan app/ (mis. compiled view, closure route
+            // di file lain) — simpan sebagai kandidat fallback, tapi tetap
+            // lanjut cari frame app/ yang lebih berguna di frame berikutnya.
+            if ($fallback === null) {
+                $fallback = ['file' => $frame['file'], 'line' => $line];
+            }
+        }
+
+        if ($fallback === null) {
+            return ['file' => null, 'line' => null];
+        }
+
+        // Fallback compiled view? Coba resolve balik ke .blade.php asli
+        // supaya bukan nama hash yang tidak actionable.
+        $resolved = $this->resolveCompiledView($fallback['file']);
+        if ($resolved !== null) {
+            return ['file' => $resolved, 'line' => $fallback['line']];
+        }
+
+        return [
+            'file' => $this->relativePath($fallback['file']),
+            'line' => $fallback['line'],
+        ];
+    }
+
+    /**
+     * True kalau file ini kode aplikasi milik developer (app/, routes/) —
+     * bukan file generated/compiled seperti storage/framework/views atau
+     * bootstrap/cache.
+     */
+    private function isAppFrame(string $file): bool
+    {
+        $appPath = str_replace('\\', '/', app_path()) . '/';
+        if (strpos($file, $appPath) === 0) {
+            return true;
+        }
+
+        $routesPath = str_replace('\\', '/', base_path('routes')) . '/';
+        if (strpos($file, $routesPath) === 0) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Compiled view (storage/framework/views/xxxx.php) tidak actionable buat
+     * developer karena namanya hash. Laravel selalu menyisipkan komentar
+     * berisi path asli .blade.php di baris terakhir file compiled, format:
+     * /**PATH /full/path/to/original.blade.php ENDPATH**\/
+     * Baca baris itu untuk balikin ke source Blade asli.
+     */
+    private function resolveCompiledView(string $compiledFile): ?string
+    {
+        if (strpos(str_replace('\\', '/', $compiledFile), '/storage/framework/views/') === false) {
+            return null;
+        }
+
+        if (! is_readable($compiledFile)) {
+            return null;
+        }
+
+        // Komentar PATH ada di baris TERAKHIR file compiled, jadi baca dari
+        // belakang secukupnya saja (hindari load file gede penuh ke memory).
+        $tail = $this->readTail($compiledFile, 500);
+        if ($tail === null) {
+            return null;
+        }
+
+        if (preg_match('#/\*\*PATH\s+(.+?)\s+ENDPATH\*\*/#', $tail, $m)) {
+            return $this->relativePath(trim($m[1]));
+        }
+
+        return null;
+    }
+
+    /**
+     * Baca N byte terakhir sebuah file tanpa load seluruh isinya ke memory.
+     */
+    private function readTail(string $path, int $bytes): ?string
+    {
+        $handle = @fopen($path, 'r');
+        if (! $handle) {
+            return null;
+        }
+
+        $size = filesize($path) ?: 0;
+        $seek = max(0, $size - $bytes);
+
+        fseek($handle, $seek);
+        $tail = stream_get_contents($handle);
+        fclose($handle);
+
+        return $tail === false ? null : $tail;
+    }
+
+    private function isInternalFrame(string $file): bool
+    {
+        $file = str_replace('\\', '/', $file);
+
+        // Framework & library (termasuk package ini kalau dipasang via composer).
+        if (strpos($file, '/vendor/') !== false) {
+            return true;
+        }
+
+        // Direktori SOURCE package ini sendiri (src/), untuk kasus di-load
+        // lewat path repo (bukan vendor). __DIR__ = src/Http/Middleware ->
+        // naik 2 = src/.
+        //
+        // PENTING: sengaja dipersempit ke src/ saja, BUKAN root repo
+        // (dirname naik 3). Kalau pakai root repo, folder testing seperti
+        // sample/ (app Laravel dummy yang ditaruh di dalam repo package
+        // untuk keperluan dev lokal) ikut ke-exclude juga — padahal
+        // app/Http/Controllers di dalam sample/ itu justru yang HARUS
+        // kedeteksi sebagai "kode developer", persis seperti app/ di project
+        // integrator yang sesungguhnya.
+        $pkgSrcRoot = str_replace('\\', '/', dirname(__DIR__, 2));
+        if ($pkgSrcRoot !== '' && strpos($file, $pkgSrcRoot . '/') === 0) {
+            return true;
+        }
+
+        foreach ((array) config('querydebug.source.ignore', []) as $needle) {
+            $needle = str_replace('\\', '/', (string) $needle);
+            if ($needle !== '' && strpos($file, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function relativePath(string $file): string
+    {
+        $file = str_replace('\\', '/', $file);
+        $base = str_replace('\\', '/', base_path());
+
+        if ($base !== '' && strpos($file, $base . '/') === 0) {
+            return substr($file, strlen($base) + 1);
+        }
+
+        return $file;
     }
 
     /** @return array{class:string,message:string} */

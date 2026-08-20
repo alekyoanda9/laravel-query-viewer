@@ -44,6 +44,17 @@
             font-size: 12px;
         }
 
+        .srcbadge {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 11px;
+            color: #4b5563;
+            background: #eef0ec;
+            border: 1px solid #d8dad2;
+            border-radius: 3px;
+            padding: 0 5px;
+            white-space: nowrap;
+        }
+
         a.btn {
             display: inline-block;
             text-decoration: none;
@@ -442,6 +453,9 @@
                                         <pre class="{{ !empty($q['failed']) ? 'failed' : '' }}">{{ $q['raw'] }}</pre>
                                         <div class="dim">
                                             {{ isset($q['ms']) && $q['ms'] !== null ? $q['ms'] . ' ms' : '' }}
+                                            @if (!empty($q['file']))
+                                                &middot; <span class="srcbadge">{{ $q['file'] }}{{ isset($q['line']) ? ':' . $q['line'] : '' }}</span>
+                                            @endif
                                             @if (!empty($q['failed'])) &middot; GAGAL: {{ $q['error'] }} @endif
                                         </div>
                                     @endforeach

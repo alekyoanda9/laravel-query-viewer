@@ -318,6 +318,19 @@
             color: #fde68a;
         }
 
+        /* file:line pemanggil query (Fitur 2) */
+        .qd-src {
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #1e293b;
+            color: #cbd5e1;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            max-width: 220px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .qd-fail-badge {
             padding: 1px 6px;
             border-radius: 4px;
@@ -444,6 +457,71 @@
         .qd-explain-out.err pre {
             color: #fecaca;
             white-space: pre-wrap;
+        }
+
+        /* ---- Sampel Data (Fitur 5) ---- */
+
+        .qd-sample-out {
+            margin-top: 6px;
+            border: 1px solid #1e293b;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .qd-sample-out .qd-explain-head b {
+            color: #fbbf24;
+        }
+
+        .qd-sample-out.err pre {
+            margin: 0;
+            background: #020617;
+            border: none;
+            padding: 8px;
+            font-size: 11px;
+            color: #fecaca;
+            white-space: pre-wrap;
+        }
+
+        .qd-sample-scroll {
+            background: #020617;
+            max-height: 260px;
+            overflow: auto;
+        }
+
+        .qd-sample-table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 11px;
+            color: #e2e8f0;
+        }
+
+        .qd-sample-table th,
+        .qd-sample-table td {
+            border: 1px solid #1e293b;
+            padding: 3px 8px;
+            text-align: left;
+            white-space: nowrap;
+            max-width: 260px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: top;
+        }
+
+        .qd-sample-table th {
+            position: sticky;
+            top: 0;
+            background: #172033;
+            color: #93c5fd;
+            font-weight: 600;
+        }
+
+        .qd-sample-table td i {
+            color: #64748b;
+        }
+
+        .qd-sample-empty {
+            text-align: center;
+            color: #64748b;
         }
 
         .qd-empty {
@@ -868,6 +946,7 @@
             unlockUrl: '{{ url('/dev/query-debug/unlock') }}',
             lockUrl: '{{ url('/dev/query-debug/lock') }}',
             explainUrl: '{{ url('/dev/query-debug/explain') }}',
+            sampleUrl: '{{ url('/dev/query-debug/sample') }}',
             captureUrl: '{{ url(config('querydebug.route_prefix', 'dev/query-debug') . '/trace/capture') }}',
             traceEnabled: {{ config('querydebug.trace.enabled', true) ? 'true' : 'false' }},
             traceCategories: {!! json_encode(config('querydebug.trace.categories', []), JSON_UNESCAPED_UNICODE) !!},
@@ -877,8 +956,8 @@
             slowMs:         {{ (int) config('querydebug.slow_ms', 500) }},
             insight:        {{ config('querydebug.insight.enabled') ? 'true' : 'false' }},
             explain:        {{ config('querydebug.insight.explain.enabled') ? 'true' : 'false' }},
-            explainAnalyze: {{ (config('querydebug.insight.explain.enabled') && config('querydebug.insight.explain.analyze')) ? 'true' : 'false' }},
-            pollMs: 2500
+            sample:         {{ config('querydebug.sample.enabled') ? 'true' : 'false' }},
+            pollMs: {{ (int) config('querydebug.poll.interval_ms', 2500) }}
         };
     </script>
     <script src="{{ asset('vendor/query-viewer/query-debug.js') }}"></script>

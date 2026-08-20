@@ -5442,7 +5442,7 @@
             "dist": {
                 "type": "path",
                 "url": "..",
-                "reference": "275ed7f28acf2fb2170600445a49011c22f82892"
+                "reference": "c035c903c03a4639ba7fa56db281c6c8d92ba748"
             },
             "require": {
                 "illuminate/database": "^5.8|^6.0|^7.0|^8.0|^9.0|^10.0|^11.0",
@@ -5462,6 +5462,14 @@
                 "psr-4": {
                     "Sd1\\QueryViewer\\": "src/"
                 }
+            },
+            "archive": {
+                "exclude": [
+                    "/sample",
+                    "/tests",
+                    "/.github",
+                    "/phpunit.xml"
+                ]
             },
             "license": [
                 "proprietary"

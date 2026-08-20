@@ -31,10 +31,9 @@ class QueryDebugInsight
         return (bool) config('querydebug.insight.explain.enabled', false);
     }
 
-    public static function analyzeEnabled(): bool
+    public static function sampleEnabled(): bool
     {
-        return self::explainEnabled()
-            && (bool) config('querydebug.insight.explain.analyze', false);
+        return (bool) config('querydebug.sample.enabled', false);
     }
 
     /**
