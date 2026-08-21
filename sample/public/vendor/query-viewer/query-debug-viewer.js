@@ -14,12 +14,17 @@
 
     var CFG = window.QD_VIEWER || {};
 
-    var elLive    = document.getElementById('qv-live');
-    var elPages   = document.getElementById('qv-pages');
+    var elLive = document.getElementById('qv-live');
+    var elPages = document.getElementById('qv-pages');
     var elContent = document.getElementById('qv-content');
-    var elSearch  = document.getElementById('qv-search');
+    var elSearch = document.getElementById('qv-search');
     var elFilters = document.getElementById('qv-filters');
-    var elClear   = document.getElementById('qv-clear');
+    var elClear = document.getElementById('qv-clear');
+    var elMode = document.getElementById('qv-mode');
+    var elExport = document.getElementById('qv-export');
+    var elModal = document.getElementById('qv-modal');
+    var elModalText = document.getElementById('qv-modal-text');
+    var elModalTitle = document.getElementById('qv-modal-title');
 
     // ---- state ------------------------------------------------------------
     var lastSeq = 0;
@@ -34,22 +39,26 @@
     var responseCache = {};   // batchId -> {loading|error|data}
 
     var filterMode = 'all';   // all|slow|n1
+    var groupMode = 'chrono'; // default: kronologis lintas menu; "Per Menu" = opsi
+    var ALL = '::all::';
     var searchText = '';
     var contentSig = '';
+    var currentExport = { md: '', filename: 'query-viewer.md' };
 
     // ---- helpers ----------------------------------------------------------
-    function esc(s) {
-        return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
-        });
-    }
+    // Fungsi bersama (formatter + pembentuk Markdown + SQL highlight) dari
+    // query-debug-shared.js — satu sumber kebenaran dengan panel FAB.
+    var QS = window.QDShared || {};
+    var esc = QS.esc, fence = QS.fence, fmtBytes = QS.fmtBytes;
+    var highlightSql = QS.highlightSql, originOf = QS.originOf;
+    var pretty = QS.prettyJson, maybePrettyJson = QS.prettyJson;
+    var payloadMd = QS.md.payload, responseMd = QS.md.response;
+    var metaMd = function (b) { return QS.md.meta(b, { includeEndpoint: true }); };
 
     function csrf() {
         var m = document.querySelector('meta[name="qd-csrf"]');
         return m ? m.getAttribute('content') : '';
     }
-
-    function originOf(b) { return b.origin || b.path || '(tanpa path)'; }
 
     function jsonHeaders() {
         return { 'X-CSRF-TOKEN': csrf(), 'Content-Type': 'application/json', 'Accept': 'application/json' };
@@ -65,21 +74,81 @@
     }
 
     // ---- data fetch (delta) ----------------------------------------------
+    // Polling adaptif (item #2) + Page Visibility (item #1): setTimeout
+    // rekursif supaya delay bisa melebar saat idle; pollHandle kini handle
+    // setTimeout, bukan setInterval.
+    var POLL_BASE = CFG.pollMs || 2500;
+    var POLL_MAX = 30000;
+    var pollIdle = 0;
+    var pollHandle = null;
+    var locked = false;
+
+    function pollDelay() {
+        return Math.min(POLL_BASE * Math.pow(2, Math.min(pollIdle, 4)), POLL_MAX);
+    }
+    function schedulePoll() {
+        if (pollHandle) { clearTimeout(pollHandle); pollHandle = null; }
+        if (locked || document.hidden) return;   // terkunci / tab tak terlihat -> diam
+        pollHandle = setTimeout(poll, pollDelay());
+    }
+
     function poll() {
+        if (locked) return;
+
         var sep = CFG.recentUrl.indexOf('?') === -1 ? '?' : '&';
         var url = CFG.recentUrl + sep + 'after=' + encodeURIComponent(lastSeq) +
             '&gen=' + encodeURIComponent(generation);
 
         fetch(url, { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(function (json) {
-                setLive(true);
-                if (!json) return;
-                merge(json.data || json);
-                renderPages();
-                renderContentIfChanged();
+            .then(function (r) {
+                if (r.status === 403) { renderLocked(); return null; }
+                return r.ok ? r.json() : null;
             })
-            .catch(function () { setLive(false); });
+            .then(function (json) {
+                if (locked) return;   // 403 -> renderLocked sudah hentikan poll
+                setLive(true);
+                if (json) {
+                    var payload = json.data || json;
+                    var gotNew = !!(payload.batches && payload.batches.length);
+                    pollIdle = gotNew ? 0 : (pollIdle + 1);
+                    merge(payload);
+                    renderPages();
+                    renderContentIfChanged();
+                }
+                schedulePoll();
+            })
+            .catch(function () { setLive(false); pollIdle = pollIdle + 1; schedulePoll(); });
+    }
+
+    var elLock = document.getElementById('qv-lock');
+
+    function lockViewer() {
+        fetch(CFG.lockUrl, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: jsonHeaders()      // sudah bawa X-CSRF-TOKEN dari meta qd-csrf
+        }).finally(renderLocked);       // apa pun balasan server, kunci tampilan lokal
+    }
+
+    if (elLock) {
+        elLock.addEventListener('click', function () {
+            if (!confirm('Kunci sesi Query Viewer? Panel dan dashboard akan mati sampai unlock lagi.')) return;
+            lockViewer();
+        });
+    }
+
+    // Sesi browser di-lock (dari panel FAB atau tab lain) saat dashboard ini
+    // masih terbuka: hentikan polling permanen & tampilkan status terkunci,
+    // alih-alih diam-diam terus polling tanpa data seperti sebelumnya.
+    function renderLocked() {
+        if (locked) return;
+        locked = true;
+        setLive(false);
+        if (pollHandle) { clearTimeout(pollHandle); pollHandle = null; }
+        var msg = '<div class="qv-empty">Sesi dikunci dari panel query viewer.<br>' +
+            'Unlock lagi lewat panel, lalu muat ulang halaman ini.</div>';
+        if (elContent) elContent.innerHTML = msg;
+        if (elPages) elPages.innerHTML = msg;
     }
 
     function merge(p) {
@@ -150,18 +219,31 @@
             return g.origin.toLowerCase().indexOf(searchText) !== -1;
         });
 
-        if (!groups.length) {
+        var html = '';
+
+        // Di mode kronologis, tambahkan entri "Semua" di atas — memilihnya
+        // menampilkan SATU aliran lintas menu urut waktu (dengan chip menu).
+        if (groupMode === 'chrono') {
+            var totalReq = orderedBatches().length;
+            html += '<div class="qv-page all' + (selectedOrigin === ALL ? ' sel' : '') + '" data-origin="' + ALL + '">' +
+                '<div class="qv-page-path">\u23f1 Semua (kronologis)</div>' +
+                '<div class="qv-page-meta"><span>' + totalReq + ' req</span><span>lintas menu</span></div>' +
+                '</div>';
+        }
+
+        if (!groups.length && groupMode !== 'chrono') {
             elPages.innerHTML = '<div class="qv-empty">Belum ada halaman terekam.</div>';
             return;
         }
 
-        // pertahankan seleksi kalau masih ada; kalau tidak, pilih yang teratas.
         var origins = groups.map(function (g) { return g.origin; });
-        if (selectedOrigin === null || origins.indexOf(selectedOrigin) === -1) {
-            selectedOrigin = origins[0];
+        // pertahankan seleksi kalau masih valid; kalau tidak, pilih default.
+        var validSel = selectedOrigin === ALL ? (groupMode === 'chrono') : (origins.indexOf(selectedOrigin) !== -1);
+        if (!validSel) {
+            selectedOrigin = groupMode === 'chrono' ? ALL : (origins[0] || null);
         }
 
-        elPages.innerHTML = groups.map(function (g) {
+        html += groups.map(function (g) {
             var cls = 'qv-page' + (g.origin === selectedOrigin ? ' sel' : '') + (g.error ? ' has-error' : '');
             return '<div class="' + cls + '" data-origin="' + esc(g.origin) + '">' +
                 '<div class="qv-page-path">/' + esc(g.origin) + '</div>' +
@@ -169,18 +251,27 @@
                 (g.error ? '<span style="color:#f87171">error</span>' : '') + '</div>' +
                 '</div>';
         }).join('');
+
+        elPages.innerHTML = html;
     }
 
     // ---- content: requests for selected origin ---------------------------
     function selectedBatches() {
         return orderedBatches().filter(function (b) {
-            return originOf(b) === selectedOrigin && passesFilter(b);
+            if (!passesFilter(b)) return false;
+            if (selectedOrigin === ALL) {
+                // aliran lintas menu — hormati kotak cari (origin/path/route).
+                if (!searchText) return true;
+                var hay = (originOf(b) + ' ' + (b.path || '') + ' ' + (b.route || '')).toLowerCase();
+                return hay.indexOf(searchText) !== -1;
+            }
+            return originOf(b) === selectedOrigin;
         });
     }
 
     function contentSignature() {
         // supaya polling idle tidak memaksa re-render (yang menghapus scroll).
-        return [selectedOrigin, filterMode].concat(selectedBatches().map(function (b) {
+        return [selectedOrigin, filterMode, groupMode].concat(selectedBatches().map(function (b) {
             return b.id + ':' + (b.queries || []).length + ':' + (b.response ? (b.response.status || '') : '');
         })).join('|');
     }
@@ -197,9 +288,12 @@
         if (!selectedOrigin) { elContent.innerHTML = '<div class="qv-note">Pilih halaman di kiri.</div>'; return; }
 
         var batches = selectedBatches();
-        var html = '<div class="qv-content-head"><div class="p">/' + esc(selectedOrigin) + '</div>' +
+        var isAll = selectedOrigin === ALL;
+        var title = isAll ? '\u23f1 Semua request (kronologis)' : '/' + esc(selectedOrigin);
+        var html = '<div class="qv-content-head"><div class="p">' + title + '</div>' +
             '<div class="m">' + batches.length + ' request' +
-            (filterMode !== 'all' ? ' (filter: ' + esc(filterMode) + ')' : '') + '</div></div>';
+            (isAll ? ' \u00b7 urut waktu, lintas menu' : '') +
+            (filterMode !== 'all' ? ' \u00b7 filter: ' + esc(filterMode) : '') + '</div></div>';
 
         if (!batches.length) {
             html += '<div class="qv-empty">Tidak ada request yang cocok filter.</div>';
@@ -228,11 +322,13 @@
         var head = '<div class="qv-req-head" data-req="' + esc(id) + '">' +
             '<span class="qv-caret">' + (open ? '\u25be' : '\u25b8') + '</span>' +
             '<span class="qv-method ' + (b.is_ajax ? 'ajax' : '') + '">' + esc(b.method) + (b.is_ajax ? ' \u00b7 AJAX' : '') + '</span>' +
+            (groupMode === 'chrono' ? '<span class="qv-origin-chip" title="/' + esc(originOf(b)) + '">/' + esc(originOf(b)) + '</span>' : '') +
             '<span class="qv-req-path">' + (b.route ? esc(b.route) : '/' + esc(b.path)) + '</span>' +
             (b.status ? '<span class="qv-badge ' + statusClass(b.status) + '">' + b.status + '</span>' : '') +
             (b.error ? '<span class="qv-badge err">ERROR</span>' : '') +
             (batchHasN1(b) ? '<span class="qv-badge n1">N+1</span>' : '') +
             '<span class="qv-badge q">' + queries.length + ' q \u00b7 ' + totalMs.toFixed(1) + ' ms</span>' +
+            '<button class="qv-mini" data-act="export-one" data-bid="' + esc(id) + '" title="Export request ini ke Markdown">MD</button>' +
             '</div>';
 
         if (!open) {
@@ -259,9 +355,9 @@
     }
 
     function renderTab(b, tab) {
-        if (tab === 'payload')  return renderPayload(b);
+        if (tab === 'payload') return renderPayload(b);
         if (tab === 'response') return renderResponse(b);
-        if (tab === 'context')  return renderContext(b);
+        if (tab === 'context') return renderContext(b);
         return renderQueries(b);
     }
 
@@ -293,7 +389,7 @@
                 (q.failed ? '<div class="qv-q-error"><b>Query gagal:</b> ' + esc(q.error || '(tanpa pesan)') + '</div>' : '') +
                 '<div class="qv-q-meta">' +
                 (q.failed ? '<span class="qv-badge err">GAGAL</span>'
-                          : '<span class="qv-ms ' + (slow ? 'slow' : '') + '">' + ms.toFixed(1) + ' ms</span>') +
+                    : '<span class="qv-ms ' + (slow ? 'slow' : '') + '">' + ms.toFixed(1) + ' ms</span>') +
                 (q.op ? '<span class="qv-op">' + esc(q.op) + (q.table ? ' ' + esc(q.table) : '') + '</span>' : '') +
                 (dup ? '<span class="qv-dup">\u00d7' + counts[q.raw] + '</span>' : '') +
                 (q.file ? '<span class="qv-src" title="pemicu query">' + esc(q.file) + (q.line ? ':' + q.line : '') + '</span>' : '') +
@@ -389,14 +485,14 @@
         fetch(CFG.batchUrl + '/' + encodeURIComponent(id) + '/response', {
             credentials: 'same-origin', headers: { 'Accept': 'application/json' }
         }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
-          .then(function (r) {
-              if (!r.ok) responseCache[id] = { error: (r.json && r.json.message) || 'Gagal memuat response.' };
-              else responseCache[id] = { data: (r.json && r.json.data) || {} };
-              contentSig = ''; renderContentIfChanged();
-          }).catch(function () {
-              responseCache[id] = { error: 'Gagal menghubungi server.' };
-              contentSig = ''; renderContentIfChanged();
-          });
+            .then(function (r) {
+                if (!r.ok) responseCache[id] = { error: (r.json && r.json.message) || 'Gagal memuat response.' };
+                else responseCache[id] = { data: (r.json && r.json.data) || {} };
+                contentSig = ''; renderContentIfChanged();
+            }).catch(function () {
+                responseCache[id] = { error: 'Gagal menghubungi server.' };
+                contentSig = ''; renderContentIfChanged();
+            });
     }
 
     // ---- EXPLAIN / Sampel -------------------------------------------------
@@ -407,11 +503,11 @@
             method: 'POST', headers: jsonHeaders(), credentials: 'same-origin',
             body: JSON.stringify({ bid: bid, query: qi, id: qid })
         }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
-          .then(function (r) {
-              if (!r.ok) explainCache[qid] = { error: (r.json && r.json.message) || 'EXPLAIN gagal.' };
-              else { var d = (r.json && r.json.data) || {}; explainCache[qid] = { plan: d.plan || '(plan kosong)', elapsed: d.elapsed_ms }; }
-              contentSig = ''; renderContentIfChanged();
-          }).catch(function () { explainCache[qid] = { error: 'Gagal menghubungi server.' }; contentSig = ''; renderContentIfChanged(); });
+            .then(function (r) {
+                if (!r.ok) explainCache[qid] = { error: (r.json && r.json.message) || 'EXPLAIN gagal.' };
+                else { var d = (r.json && r.json.data) || {}; explainCache[qid] = { plan: d.plan || '(plan kosong)', elapsed: d.elapsed_ms }; }
+                contentSig = ''; renderContentIfChanged();
+            }).catch(function () { explainCache[qid] = { error: 'Gagal menghubungi server.' }; contentSig = ''; renderContentIfChanged(); });
     }
 
     function runSample(bid, qi, qid) {
@@ -421,11 +517,11 @@
             method: 'POST', headers: jsonHeaders(), credentials: 'same-origin',
             body: JSON.stringify({ bid: bid, query: qi, id: qid })
         }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, json: j }; }); })
-          .then(function (r) {
-              if (!r.ok) sampleCache[qid] = { error: (r.json && r.json.message) || 'Sampel gagal.' };
-              else { var d = (r.json && r.json.data) || {}; sampleCache[qid] = { columns: d.columns || [], rows: d.rows || [], elapsed: d.elapsed_ms }; }
-              contentSig = ''; renderContentIfChanged();
-          }).catch(function () { sampleCache[qid] = { error: 'Gagal menghubungi server.' }; contentSig = ''; renderContentIfChanged(); });
+            .then(function (r) {
+                if (!r.ok) sampleCache[qid] = { error: (r.json && r.json.message) || 'Sampel gagal.' };
+                else { var d = (r.json && r.json.data) || {}; sampleCache[qid] = { columns: d.columns || [], rows: d.rows || [], elapsed: d.elapsed_ms }; }
+                contentSig = ''; renderContentIfChanged();
+            }).catch(function () { sampleCache[qid] = { error: 'Gagal menghubungi server.' }; contentSig = ''; renderContentIfChanged(); });
     }
 
     function explainOut(qid) {
@@ -464,65 +560,7 @@
         return head + t + '</div>';
     }
 
-    // ---- SQL highlight (tokenizer sederhana, aman dari keyword-di-string) --
-    var KEYWORDS = {};
-    ('select from where and or not in is null as join left right inner outer on group by order having limit offset ' +
-     'insert into values update set delete distinct union all count sum avg min max case when then else end ' +
-     'asc desc between like ilike exists with returning coalesce cast over partition').split(' ')
-        .forEach(function (k) { KEYWORDS[k] = 1; });
-
-    function highlightSql(sql) {
-        var out = '', i = 0, n = sql.length;
-        while (i < n) {
-            var ch = sql[i];
-            if (ch === "'") {
-                var j = i + 1, str = "'";
-                while (j < n) {
-                    str += sql[j];
-                    if (sql[j] === "'") {
-                        if (j + 1 < n && sql[j + 1] === "'") { str += "'"; j += 2; continue; }
-                        j++; break;
-                    }
-                    j++;
-                }
-                out += '<span class="s">' + esc(str) + '</span>'; i = j; continue;
-            }
-            if (ch === '-' && i + 1 < n && sql[i + 1] === '-') {
-                var k = i; while (k < n && sql[k] !== '\n') k++;
-                out += '<span class="c">' + esc(sql.slice(i, k)) + '</span>'; i = k; continue;
-            }
-            if (/[A-Za-z_]/.test(ch)) {
-                var w = ''; while (i < n && /[A-Za-z0-9_]/.test(sql[i])) { w += sql[i]; i++; }
-                out += KEYWORDS[w.toLowerCase()] ? '<span class="k">' + esc(w) + '</span>' : esc(w);
-                continue;
-            }
-            if (/[0-9]/.test(ch)) {
-                var num = ''; while (i < n && /[0-9.]/.test(sql[i])) { num += sql[i]; i++; }
-                out += '<span class="n">' + esc(num) + '</span>'; continue;
-            }
-            out += esc(ch); i++;
-        }
-        return out;
-    }
-
     // ---- misc formatting --------------------------------------------------
-    function pretty(v) {
-        try { return JSON.stringify(v, null, 2); } catch (e) { return String(v); }
-    }
-    function maybePrettyJson(s) {
-        if (typeof s !== 'string') return pretty(s);
-        var t = s.trim();
-        if (t && (t[0] === '{' || t[0] === '[')) {
-            try { return JSON.stringify(JSON.parse(t), null, 2); } catch (e) { return s; }
-        }
-        return s;
-    }
-    function fmtBytes(n) {
-        n = Number(n || 0);
-        if (n < 1024) return n + ' B';
-        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-        return (n / 1024 / 1024).toFixed(1) + ' MB';
-    }
     function copyText(text, btn) {
         function ok() { if (btn) { var o = btn.textContent; btn.textContent = 'tersalin'; btn.classList.add('ok'); setTimeout(function () { btn.textContent = o; btn.classList.remove('ok'); }, 1000); } }
         if (navigator.clipboard) navigator.clipboard.writeText(text).then(ok).catch(function () { fallbackCopy(text, ok); });
@@ -530,7 +568,96 @@
     }
     function fallbackCopy(text, ok) {
         var ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta);
-        ta.select(); try { document.execCommand('copy'); ok(); } catch (e) {} document.body.removeChild(ta);
+        ta.select(); try { document.execCommand('copy'); ok(); } catch (e) { } document.body.removeChild(ta);
+    }
+
+    // ---- Export Markdown (payload + query + response) ---------------------
+    // Builder MD (fence/metaMd/payloadMd/responseMd/query) hidup di QDShared;
+    // di sini tinggal merangkai. queriesMd memakai QS.md.query + hitung duplikat.
+    function queriesMd(b) {
+        var queries = b.queries || [];
+        if (!queries.length) return '_(tidak ada query)_';
+        var counts = QS.dupCounts(b);
+        return queries.map(function (q) { return QS.md.query(q, counts[q.raw]); }).join('\n\n');
+    }
+
+    // Ambil response body satu batch (lazy) untuk export. Selalu resolve.
+    function fetchResponseData(id) {
+        if (!CFG.response || !id) return Promise.resolve(null);
+        return fetch(CFG.batchUrl + '/' + encodeURIComponent(id) + '/response', {
+            credentials: 'same-origin', headers: { 'Accept': 'application/json' }
+        }).then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) { return (j && j.data) || null; })
+            .catch(function () { return null; });
+    }
+
+    function stamp(at) {
+        var s = String(at || '').replace(/[^0-9]/g, '');
+        return s ? s.slice(0, 14) : String(Date.now());
+    }
+
+    // Rangkai MD dari sekumpulan batch (urut kronologis: paling lama dulu).
+    function exportBatches(batches, title, filename) {
+        if (!batches.length) return;
+        var chron = batches.slice().reverse(); // selectedBatches() terbaru-dulu
+
+        openModal('Menyiapkan…', '# ' + title + '\n\n_Mengambil response…_', filename);
+
+        Promise.all(chron.map(function (b) { return fetchResponseData(b.id); })).then(function (resps) {
+            var totalQ = 0, totalMs = 0;
+            chron.forEach(function (b) {
+                (b.queries || []).forEach(function (q) { totalQ++; totalMs += parseFloat(q.time_ms || 0); });
+            });
+
+            var md = '# ' + title + '\n\n' +
+                '_' + chron.length + ' request, ' + totalQ + ' query, total ' + totalMs.toFixed(1) + ' ms_\n\n';
+
+            chron.forEach(function (b, i) {
+                var pl = payloadMd(b), rp = responseMd(resps[i]);
+                md += '---\n\n## ' + (i + 1) + '. ' + b.method + ' /' + b.path + (b.is_ajax ? ' (AJAX)' : '') + '\n\n' +
+                    metaMd(b) + '\n\n' +
+                    (pl ? pl + '\n\n' : '') +
+                    '**Query:**\n\n' + queriesMd(b) + '\n\n' +
+                    (rp ? rp + '\n\n' : '');
+            });
+
+            openModal(title, md, filename);
+        });
+    }
+
+    function exportOne(id) {
+        var b = batchesById[id];
+        if (!b) return;
+        exportBatches([b], (b.route || '/' + originOf(b)), 'qd-request-' + stamp(b.at) + '.md');
+    }
+
+    function exportCurrentView() {
+        var batches = selectedBatches();
+        if (!batches.length) return;
+        var title = selectedOrigin === ALL
+            ? 'Query Viewer \u2014 semua request (kronologis)'
+            : 'Query Viewer \u2014 halaman /' + selectedOrigin;
+        var fn = selectedOrigin === ALL ? 'qd-kronologis-' + stamp() + '.md' : 'qd-halaman-' + stamp() + '.md';
+        exportBatches(batches, title, fn);
+    }
+
+    function openModal(title, md, filename) {
+        currentExport = { md: md, filename: filename || 'query-viewer.md' };
+        if (elModalTitle) elModalTitle.textContent = title || 'Export Markdown';
+        if (elModalText) elModalText.value = md;
+        if (elModal) elModal.removeAttribute('hidden');
+        if (elModalText) { elModalText.focus(); elModalText.setSelectionRange(0, 0); }
+    }
+    function closeModal() { if (elModal) elModal.setAttribute('hidden', ''); }
+    function downloadMd(text, filename) {
+        try {
+            var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = filename || 'query-viewer.md';
+            document.body.appendChild(a); a.click();
+            setTimeout(function () { URL.revokeObjectURL(url); if (a.parentNode) a.parentNode.removeChild(a); }, 100);
+        } catch (e) { }
     }
 
     // ---- events -----------------------------------------------------------
@@ -549,11 +676,12 @@
         if (actEl) {
             var act = actEl.getAttribute('data-act');
             if (act === 'explain') { runExplain(actEl.getAttribute('data-bid'), parseInt(actEl.getAttribute('data-qi'), 10), actEl.getAttribute('data-qid')); return; }
-            if (act === 'sample')  { runSample(actEl.getAttribute('data-bid'), parseInt(actEl.getAttribute('data-qi'), 10), actEl.getAttribute('data-qid')); return; }
+            if (act === 'sample') { runSample(actEl.getAttribute('data-bid'), parseInt(actEl.getAttribute('data-qi'), 10), actEl.getAttribute('data-qid')); return; }
             if (act === 'explain-close') { delete explainCache[actEl.getAttribute('data-qid')]; contentSig = ''; renderContent(); return; }
             if (act === 'sample-close') { delete sampleCache[actEl.getAttribute('data-qid')]; contentSig = ''; renderContent(); return; }
             if (act === 'copy-sql') { var pre = actEl.closest('.qv-q').querySelector('pre.qv-sql'); copyText(pre ? pre.textContent : '', actEl); return; }
             if (act === 'copy-resp') { var rp = actEl.closest('.qv-out').querySelector('pre'); copyText(rp ? rp.textContent : '', actEl); return; }
+            if (act === 'export-one') { exportOne(actEl.getAttribute('data-bid')); return; }
         }
 
         var tabEl = t.closest ? t.closest('.qv-tab') : null;
@@ -580,6 +708,34 @@
         contentSig = ''; renderContent();
     });
 
+    if (elMode) {
+        elMode.addEventListener('click', function (e) {
+            var b = e.target.closest ? e.target.closest('[data-m]') : null;
+            if (!b) return;
+            groupMode = b.getAttribute('data-m');
+            [].forEach.call(elMode.querySelectorAll('button'), function (x) { x.classList.toggle('on', x === b); });
+            // masuk kronologis -> default "Semua"; balik ke per-menu -> menu pertama.
+            selectedOrigin = groupMode === 'chrono' ? ALL : null;
+            renderPages();
+            contentSig = ''; renderContent();
+        });
+    }
+
+    if (elExport) {
+        elExport.addEventListener('click', function () { exportCurrentView(); });
+    }
+    if (elModal) {
+        document.getElementById('qv-modal-close').addEventListener('click', closeModal);
+        document.getElementById('qv-modal-copy').addEventListener('click', function () {
+            if (elModalText) { elModalText.focus(); elModalText.select(); }
+            copyText(currentExport.md, this);
+        });
+        document.getElementById('qv-modal-download').addEventListener('click', function () {
+            downloadMd(currentExport.md, currentExport.filename);
+        });
+        elModal.addEventListener('click', function (e) { if (e.target === elModal) closeModal(); });
+    }
+
     var searchTimer = null;
     elSearch.addEventListener('input', function () {
         clearTimeout(searchTimer);
@@ -601,6 +757,16 @@
     });
 
     // ---- go ---------------------------------------------------------------
-    poll();
-    setInterval(poll, CFG.pollMs || 2500);
+    // Item #1 — Page Visibility: tab disembunyikan -> stop poll; kembali
+    // terlihat (dan belum locked) -> satu poll cepat lalu backoff lagi.
+    document.addEventListener('visibilitychange', function () {
+        if (document.hidden) {
+            if (pollHandle) { clearTimeout(pollHandle); pollHandle = null; }
+        } else if (!locked) {
+            pollIdle = 0;
+            poll();
+        }
+    });
+
+    poll();   // poll() menjadwalkan siklus berikutnya sendiri (schedulePoll)
 })();

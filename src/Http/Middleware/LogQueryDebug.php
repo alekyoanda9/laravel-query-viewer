@@ -346,7 +346,6 @@ class LogQueryDebug
         return false;
     }
 
-
     private function relativePath(string $file): string
     {
         $file = str_replace('\\', '/', $file);
@@ -434,8 +433,24 @@ class LogQueryDebug
 
         try {
             $input = $request->except(['_token']);
+            $input = is_array($input) ? $input : [];
 
-            return is_array($input) ? $input : [];
+            // Fallback body: kalau $request->all() kosong (mis. body JSON dikirim
+            // dengan Content-Type non-standard sehingga tidak ikut terparse
+            // Laravel), coba baca langsung dari raw body. Ini yang membuat
+            // "request payload body" tetap kelihatan di panel/dashboard untuk
+            // request AJAX/cetak yang mengirim JSON mentah.
+            if (empty($input)) {
+                $raw = (string) $request->getContent();
+                if ($raw !== '' && strlen($raw) <= 65536) {
+                    $decoded = json_decode($raw, true);
+                    if (is_array($decoded) && ! empty($decoded)) {
+                        $input = $decoded;
+                    }
+                }
+            }
+
+            return $input;
         } catch (\Throwable $e) {
             return [];
         }

@@ -3,6 +3,7 @@
 namespace Sd1\QueryViewer\Support;
 
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Session;
 
 /**
@@ -89,8 +90,24 @@ class Context
     }
 
     /**
-     * Apakah sesi ini sudah "unlock" (gate tahap dua). Default: flag session
-     * milik package. App jarang perlu mengganti ini.
+     * Apakah sesi ini sudah "unlock" (gate tahap dua). Default: flag di Cache,
+     * SENGAJA bukan session. App jarang perlu mengganti ini.
+     *
+     * Kenapa Cache, bukan Session::put/forget (versi lama): Laravel menyimpan
+     * seluruh isi session sebagai SATU blob yang dibaca utuh di awal request
+     * dan ditulis balik utuh di akhir request (StartSession::terminate()) —
+     * untuk SEMUA request grup 'web', termasuk GET biasa yang tidak sengaja
+     * menyentuh session. Dashboard /viewer polling tiap 2,5 detik, jadi selalu
+     * ada request lain yang session-nya sedang "dalam perjalanan" (sudah
+     * dibaca, belum ditulis balik) persis saat Lock diproses. Kalau request
+     * poll itu SELESAI (dan menulis balik blob session LAMA-nya) SETELAH Lock
+     * menulis blob BARU, flag 'active' balik jadi true lagi — persis gejala
+     * "sudah Lock tapi /viewer tetap jalan terus, gak pernah 403".
+     *
+     * Cache::put/forget menulis SATU key secara langsung (bukan baca-ubah-
+     * tulis blob besar berisi key lain), jadi tidak kena race ini sama sekali
+     * — sejalan dengan pendekatan yang sudah dipakai QueryDebugStore untuk
+     * ring buffer batch.
      */
     public static function isActive(): bool
     {
@@ -98,17 +115,22 @@ class Context
             return (bool) call_user_func(static::$active);
         }
 
-        return Session::get('querydebug.active') === true;
+        return Cache::get(self::activeKey()) === true;
     }
 
     public static function markActive(): void
     {
-        Session::put('querydebug.active', true);
+        Cache::put(self::activeKey(), true, now()->addMinutes((int) config('querydebug.ttl_minutes', 30)));
     }
 
     public static function markInactive(): void
     {
-        Session::forget('querydebug.active');
+        Cache::forget(self::activeKey());
+    }
+
+    private static function activeKey(): string
+    {
+        return 'qdebug:active:' . static::identity();
     }
 
     /**

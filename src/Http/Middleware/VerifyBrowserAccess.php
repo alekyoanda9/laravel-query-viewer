@@ -3,20 +3,28 @@
 namespace Sd1\QueryViewer\Http\Middleware;
 
 use Closure;
-use Illuminate\Support\Facades\Session;
+use Sd1\QueryViewer\Support\Context;
 
 /**
  * Gate untuk HALAMAN yang dibuka lewat NAVIGASI BROWSER (dashboard /viewer, dan
  * endpoint JSON-nya yang dipanggil dari halaman itu).
  *
- * Sama seperti VerifyTraceAccess: request navigasi biasa tidak bisa membawa
- * header X-Query-Debug-Key, jadi key diterima sekali lewat ?key=… lalu ditandai
- * di session. Flag session-nya DIBAGI dengan trace viewer — sekali dev membuka
- * salah satu (trace atau dashboard) dengan ?key=, keduanya ikut terbuka di sesi
- * itu, jadi tidak perlu menempel key dua kali.
+ * Request navigasi biasa tidak bisa membawa header X-Query-Debug-Key, jadi akses
+ * halaman ini DIIKAT ke status "unlock" sesi (Context::isActive) — status yang
+ * SAMA dengan yang dipakai panel & perekaman query:
  *
- * Ini generalisasi yang dimaksud §3.2: satu pola akses browser dipakai bersama
- * trace viewer & dashboard.
+ *  - kalau sesi sudah unlock (lewat panel ATAU lewat ?key= di bawah) -> boleh;
+ *  - kalau di-Lock (Context::markInactive) -> isActive() jadi false -> halaman
+ *    ikut terkunci lagi. Flag-nya sendiri disimpan di Cache (lihat Context::
+ *    isActive()), bukan Session — supaya polling /viewer/recent tiap 2,5 detik
+ *    tidak bisa balik menghidupkan flag ini lewat race penulisan session.
+ *  - kalau API key belum di-set di config -> tidak ada yang bisa unlock ->
+ *    halaman tetap 403.
+ *
+ * Key masih bisa diberikan sekali lewat ?key= (untuk buka via link/bookmark
+ * tanpa harus buka panel dulu); begitu cocok, sesi ditandai aktif lalu
+ * di-redirect ke URL bersih tanpa key (supaya key tidak nyangkut di history /
+ * title bar / log akses).
  */
 class VerifyBrowserAccess
 {
@@ -31,25 +39,31 @@ class VerifyBrowserAccess
             abort(404);
         }
 
-        if (Session::get(VerifyTraceAccess::SESSION_FLAG) === true) {
-            return $next($request);
-        }
-
         $expected = config('querydebug.key');
         $given    = (string) $request->query('key', '');
 
-        if (is_string($expected) && $expected !== '' && $given !== '' && hash_equals($expected, $given)) {
-            Session::put(VerifyTraceAccess::SESSION_FLAG, true);
+        // Ada ?key= di URL: konsumsi SEKALI lalu SELALU redirect ke URL bersih.
+        // Ini WAJIB dilakukan sebelum cek isActive() — kalau tidak, saat halaman
+        // dibuka sementara sesi sudah aktif, key menempel di address bar dan
+        // setiap refresh akan mem-markActive() ulang (membuka kunci lagi setelah
+        // Lock). Key valid -> tandai aktif; key salah -> tetap dibuang tanpa
+        // menandai aktif (biar tidak bocor & tidak loop).
+        if ($given !== '') {
+            if (is_string($expected) && $expected !== '' && hash_equals($expected, $given)) {
+                Context::markActive();
+            }
 
-            // Redirect ke URL tanpa ?key= supaya key tidak nyangkut di riwayat
-            // browser / title bar saat share screen / log akses. Query lain
-            // (mis. filter) dipertahankan.
             $params = $request->query();
             unset($params['key']);
 
             return redirect($request->url() . (empty($params) ? '' : ('?' . http_build_query($params))));
         }
 
-        abort(403, 'Halaman terkunci. Buka sekali dengan ?key=<API key> untuk membuka akses di sesi ini.');
+        // Tanpa key di URL: murni bergantung status unlock sesi.
+        if (Context::isActive()) {
+            return $next($request);
+        }
+
+        abort(403, 'Dashboard terkunci. Unlock Query Viewer dulu (lewat panel atau ?key=<API key>) untuk sesi ini.');
     }
 }

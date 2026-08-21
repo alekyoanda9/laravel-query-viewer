@@ -259,6 +259,44 @@
             border-radius: 6px; background: #1c1204; font-size: 11.5px; color: #fde68a;
         }
         .qv-insight b { color: #fcd34d; }
+
+        /* segmented control mode */
+        .qv-seg { display: flex; border: 1px solid var(--line2); border-radius: 6px; overflow: hidden; }
+        .qv-seg button {
+            background: var(--panel2); color: var(--dim); border: none;
+            padding: 6px 12px; font-size: 12px; cursor: pointer;
+        }
+        .qv-seg button + button { border-left: 1px solid var(--line2); }
+        .qv-seg button.on { background: #0c4a6e; color: #bae6fd; }
+        .qv-seg button:hover { color: var(--text); }
+
+        /* chip menu di mode kronologis */
+        .qv-origin-chip {
+            background: #0c2233; color: #7dd3fc; border-radius: 4px;
+            padding: 1px 7px; font-size: 10.5px; white-space: nowrap;
+            max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+        }
+        .qv-page.all { background: #0c1a2e; }
+        .qv-page.all .qv-page-path { color: var(--accent); }
+
+        /* export modal */
+        .qv-modal {
+            position: fixed; inset: 0; background: rgba(2,6,23,.72);
+            display: flex; align-items: center; justify-content: center; z-index: 50;
+        }
+        .qv-modal[hidden] { display: none; }
+        .qv-modal-card {
+            width: min(900px, 92vw); height: min(80vh, 720px);
+            background: var(--panel); border: 1px solid var(--line2); border-radius: 10px;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .qv-modal-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+        .qv-modal-head b { font-size: 13px; }
+        #qv-modal-text {
+            flex: 1; width: 100%; border: none; resize: none; padding: 14px;
+            background: #020617; color: #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 12px; line-height: 1.5;
+        }
     </style>
 </head>
 <body>
@@ -267,13 +305,19 @@
             <h1>Query <span>Viewer</span></h1>
             <span title="polling"><span class="qv-dot" id="qv-live"></span></span>
             <div class="qv-spacer"></div>
+            <div class="qv-seg" id="qv-mode" title="Kelompokkan per menu, atau urut murni kronologis lintas menu">
+                <button data-m="menu">Per Menu</button>
+                <button data-m="chrono" class="on">Kronologis</button>
+            </div>
             <div class="qv-filters" id="qv-filters">
                 <button data-f="all" class="on">All</button>
                 <button data-f="slow">Slow &gt;{{ $slow_ms }}ms</button>
                 <button data-f="n1">N+1</button>
             </div>
             <input class="qv-search" id="qv-search" placeholder="Cari URL / route…" spellcheck="false">
+            <button class="qv-btn" id="qv-export" title="Export tampilan sekarang ke Markdown (payload + query + response)">Export MD</button>
             <button class="qv-btn" id="qv-clear">Clear</button>
+            <button class="qv-btn" id="qv-lock" title="Kunci sesi — matikan Query Viewer sampai unlock lagi">Lock</button>
         </div>
         <div class="qv-main">
             <div class="qv-side">
@@ -286,9 +330,23 @@
         </div>
     </div>
 
+    <div class="qv-modal" id="qv-modal" hidden>
+        <div class="qv-modal-card">
+            <div class="qv-modal-head">
+                <b id="qv-modal-title">Export Markdown</b>
+                <div class="qv-spacer"></div>
+                <button class="qv-btn" id="qv-modal-copy">Copy</button>
+                <button class="qv-btn" id="qv-modal-download">Download .md</button>
+                <button class="qv-btn" id="qv-modal-close">Tutup</button>
+            </div>
+            <textarea id="qv-modal-text" spellcheck="false" readonly></textarea>
+        </div>
+    </div>
+
     <script>
         window.QD_VIEWER = {
             recentUrl:   '{{ url($prefix . '/viewer/recent') }}',
+            lockUrl:     '{{ url($prefix . '/viewer/lock') }}', 
             batchUrl:    '{{ url($prefix . '/viewer/batch') }}',
             explainUrl:  '{{ url($prefix . '/viewer/explain') }}',
             sampleUrl:   '{{ url($prefix . '/viewer/sample') }}',
@@ -301,6 +359,7 @@
             response:    {{ $response_enabled ? 'true' : 'false' }}
         };
     </script>
+    <script src="{{ asset('vendor/query-viewer/query-debug-shared.js') }}"></script>
     <script src="{{ asset('vendor/query-viewer/query-debug-viewer.js') }}"></script>
 </body>
 </html>

@@ -128,6 +128,14 @@ class QueryDebugController extends Controller
         ], 'Unlocked');
     }
 
+    public function viewerLock()
+    {
+        Context::markInactive();
+        QueryDebugStore::clearFor(Context::identity());
+
+        return $this->ok(null, 'Locked');
+    }
+
     public function lock()
     {
         Context::markInactive();

@@ -19,6 +19,12 @@ return [
     // API key untuk unlock (dicek pakai hash_equals di middleware gate).
     'key' => env('QUERY_DEBUG_KEY'),
 
+    // Otomatis Cache::forget ring buffer query (QueryDebugStore) + kunci lagi
+    // (Context::markInactive) begitu event Illuminate\Auth\Events\Logout
+    // tertangkap. TIDAK menyentuh trace (querydebug/traces) — itu arsip
+    // tiket, sengaja dipertahankan lepas dari siklus login dev.
+    'clear_on_logout' => env('QUERY_DEBUG_CLEAR_ON_LOGOUT', true),
+
     /*
     |--------------------------------------------------------------------------
     | Koneksi & route
@@ -44,7 +50,7 @@ return [
     |--------------------------------------------------------------------------
     */
 
-    'slow_ms'     => env('QUERY_DEBUG_SLOW_MS', 500),
+    'slow_ms'     => env('QUERY_DEBUG_SLOW_MS', 3000),
     'max_batches' => env('QUERY_DEBUG_MAX_BATCHES', 30),
     'ttl_minutes' => env('QUERY_DEBUG_TTL_MINUTES', 30),
 
@@ -131,8 +137,6 @@ return [
             'image/jpeg',
             'image/gif',
             'image/webp',
-            'video/mp4',
-            'video/webm',
         ],
 
         // Dipakai default oleh Artisan command querydebug:prune-traces kalau
@@ -207,7 +211,7 @@ return [
 
         // Interval polling panel (ms). Client tetap boleh mempercepat sesaat
         // setelah ajaxComplete.
-        'interval_ms' => env('QUERY_DEBUG_POLL_MS', 2500),
+        'interval_ms' => env('QUERY_DEBUG_POLL_MS', 5000),
 
         // Batasi jumlah batch yang dikirim dalam satu response saat client
         // minta full snapshot (after=0 / generation berubah), supaya burst
@@ -216,7 +220,7 @@ return [
 
         // (Disiapkan untuk Fitur 1b) pisah ringkasan vs detail berat + endpoint
         // lazy batch/{id}/*. Belum diaktifkan di versi ini.
-        'lazy_detail' => env('QUERY_DEBUG_POLL_LAZY', false),
+        'lazy_detail' => env('QUERY_DEBUG_POLL_LAZY', true),
     ],
 
     /*
@@ -308,13 +312,14 @@ return [
         'enabled' => env('QUERY_DEBUG_RESPONSE', true),
 
         // Batas ukuran body yang disimpan (KB). Lebih dari ini dipotong.
-        'max_kb' => env('QUERY_DEBUG_RESPONSE_MAX_KB', 64),
+        'max_kb' => env('QUERY_DEBUG_RESPONSE_MAX_KB', 32),
 
-        // Content-type yang boleh ditangkap body-nya. text/* & application/json.
-        // Selain ini (mis. octet-stream, pdf, excel) hanya metadata.
+        // Content-type yang boleh ditangkap body-nya. HANYA JSON — response HTML
+        // (halaman penuh) sengaja TIDAK ditangkap: berat, dan yang berguna untuk
+        // debugging API/AJAX adalah JSON-nya. Selain ini (html, octet-stream,
+        // pdf, excel) hanya metadata.
         'capture_types' => [
             'application/json',
-            'text/',
         ],
     ],
 

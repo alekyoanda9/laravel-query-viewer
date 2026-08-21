@@ -367,6 +367,44 @@
             color: #fca5a5;
         }
 
+        /* payload request (Fitur 3.1) */
+        .qd-payload {
+            border-top: 1px solid #1e293b;
+            background: #0b1220;
+            padding: 6px 10px;
+            font-size: 11px;
+        }
+        .qd-payload > .lbl {
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            font-size: 9.5px;
+            margin-bottom: 3px;
+        }
+        .qd-payload code {
+            display: inline-block;
+            background: #111c30;
+            color: #cbd5e1;
+            border-radius: 3px;
+            padding: 1px 6px;
+            margin: 0 4px 4px 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            word-break: break-all;
+        }
+
+        /* chip menu di mode kronologis */
+        .qd-origin-chip {
+            background: #0c2233;
+            color: #7dd3fc;
+            border-radius: 4px;
+            padding: 1px 6px;
+            font-size: 10px;
+            max-width: 160px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .qd-conn {
             color: #64748b;
         }
@@ -878,6 +916,9 @@
                 <label title="Hanya tampilkan query yang dijalankan lebih dari sekali dalam satu request">
                     <input type="checkbox" data-qd="duponly"> duplikat
                 </label>
+                <label title="Kelompokkan request per menu. Kalau dimatikan (default), request tampil urut kronologis lintas menu.">
+                    <input type="checkbox" data-qd="chrono"> grup per menu
+                </label>
             </div>
             <div class="qd-body">
                 <div class="qd-empty">Memuat...</div>
@@ -959,8 +1000,11 @@
             insight:        {{ config('querydebug.insight.enabled') ? 'true' : 'false' }},
             explain:        {{ config('querydebug.insight.explain.enabled') ? 'true' : 'false' }},
             sample:         {{ config('querydebug.sample.enabled') ? 'true' : 'false' }},
+            response:       {{ config('querydebug.response.enabled') ? 'true' : 'false' }},
+            batchUrl: '{{ url(config('querydebug.route_prefix', 'dev/query-debug') . '/batch') }}',
             pollMs: {{ (int) config('querydebug.poll.interval_ms', 2500) }}
         };
     </script>
+    <script src="{{ asset('vendor/query-viewer/query-debug-shared.js') }}"></script>
     <script src="{{ asset('vendor/query-viewer/query-debug.js') }}"></script>
 @endif

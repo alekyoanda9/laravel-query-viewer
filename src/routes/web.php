@@ -16,11 +16,29 @@ use Sd1\QueryViewer\Http\Controllers\TraceController;
 $prefix = config('querydebug.route_prefix', 'dev/query-debug');
 
 /*
-| Endpoint yang dipanggil panel lewat fetch(): gate header API key.
+| unlock & lock: cukup header key — HARUS tetap jalan saat sesi belum aktif
+| (kalau gate active dipasang di sini: ayam-dan-telur, tak akan pernah bisa
+| unlock). trace/capture juga di sini kalau ingin support tetap bisa ambil
+| kasus tanpa terhalang status lock — pindah ke grup bawah kalau mau ikut lock.
 */
 Route::group([
     'prefix'     => $prefix,
     'middleware' => ['web', 'querydebug.gate'],
+], function () {
+    Route::post('/unlock', [QueryDebugController::class, 'unlock']);
+    Route::post('/lock', [QueryDebugController::class, 'lock']);
+    Route::post('/trace/capture', [TraceController::class, 'capture']);
+});
+
+/*
+| Endpoint DATA panel: header key + sesi harus unlock (querydebug.active).
+| Inilah yang menautkan panel ke status Lock — begitu markInactive() dipanggil
+| dari mana pun (Lock panel, Lock viewer, logout), /recent balas 423 dan panel
+| mengunci dirinya sendiri.
+*/
+Route::group([
+    'prefix'     => $prefix,
+    'middleware' => ['web', 'querydebug.gate', 'querydebug.active'],
 ], function () {
     Route::get('/recent', [QueryDebugController::class, 'recent']);
     Route::get('/clear', [QueryDebugController::class, 'clear']);
@@ -29,11 +47,6 @@ Route::group([
     Route::get('/batch/{id}/response', [QueryDebugController::class, 'batchResponse']);
     Route::post('/explain', [QueryDebugController::class, 'explain']);
     Route::post('/sample', [QueryDebugController::class, 'sample']);
-    Route::post('/unlock', [QueryDebugController::class, 'unlock']);
-    Route::post('/lock', [QueryDebugController::class, 'lock']);
-
-    // Support menekan tombol di panel -> promote ring buffer jadi trace.
-    Route::post('/trace/capture', [TraceController::class, 'capture']);
 });
 
 /*
@@ -49,6 +62,7 @@ Route::group([
     'middleware' => ['web', 'querydebug.browser'],
 ], function () {
     Route::get('/', [QueryDebugController::class, 'viewer']);
+    Route::post('/lock', [QueryDebugController::class, 'viewerLock']);
     Route::get('/recent', [QueryDebugController::class, 'recent']);
     Route::get('/clear', [QueryDebugController::class, 'clear']);
     Route::get('/batch/{id}', [QueryDebugController::class, 'batch']);

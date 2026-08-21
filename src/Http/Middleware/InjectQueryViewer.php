@@ -29,6 +29,16 @@ class InjectQueryViewer
             return $response;
         }
 
+        // JANGAN suntik panel ke halaman milik package sendiri. Dashboard
+        // (/viewer) & trace viewer adalah halaman full-page yang punya UI-nya
+        // sendiri (dan </body> juga) — panel FAB melayang di atasnya cuma dobel
+        // dan membingungkan. Endpoint API JSON tidak akan lolos cek text/html di
+        // bawah, tapi ikut dikecualikan di sini demi jelasnya.
+        $prefix = trim((string) config('querydebug.route_prefix', 'dev/query-debug'), '/');
+        if ($prefix !== '' && ($request->is($prefix) || $request->is($prefix . '/*'))) {
+            return $response;
+        }
+
         if (! method_exists($response, 'getContent') || ! method_exists($response, 'setContent')) {
             return $response;
         }
